@@ -1,6 +1,7 @@
 from typing import List
-import locale
-locale.setlocale(locale.LC_ALL, '')
+import matplotlib.pyplot as plt
+from matplotlib.ticker import StrMethodFormatter
+import numpy as np
 
 
 class Actor:
@@ -81,6 +82,13 @@ class Slice:
     def __str__(self):
         return " | ".join(["{}".format(slot) for slot in self.slots])
 
+    def get_actor_income(self, actor: Actor) -> float:
+        actor_income = 0.0
+        for slot in self.slots:
+            if slot.actor == actor:
+                actor_income += slot.income
+        return actor_income
+
 
 class Waterfall:
     def __init__(self, slices: List[Slice]):
@@ -103,6 +111,12 @@ class Waterfall:
     def __str__(self):
         return "\n".join(["{}".format(slice) for slice in self.slices])
 
+    def get_actor_income(self, actor: Actor) -> float:
+        actor_income = 0.0
+        for slice in self.slices:
+            actor_income += slice.get_actor_income(actor)
+        return actor_income
+
 
 distributor = Actor(break_even=100_000, name="Distributeur")
 producer = Actor(break_even=5_000_000, name="Producteur")
@@ -115,8 +129,31 @@ second_slice = Slice(slots=[Slot(actor=producer, negotiated_retribution=1_000_00
                      negotiated_margin=0.0)])
 third_slice = Slice(slots=[Slot(actor=canal_plus, negotiated_retribution=2_000_000, negotiated_margin=0.2),
                            Slot(actor=sofica, negotiated_retribution=500_000, negotiated_margin=0.04)])
+fourth_slice = Slice(slots=[Slot(
+    actor=producer, negotiated_retribution=1_000_000, negotiated_margin=0.10)])
 
-waterfall = Waterfall(slices=[first_slice, second_slice, third_slice])
+waterfall = Waterfall(
+    slices=[first_slice, second_slice, third_slice, fourth_slice])
 
-waterfall.take_from_income_as_negotiated(3_000_000)
-print(waterfall)
+# waterfall.take_from_income_as_negotiated(5_000_000)
+# print(waterfall)
+# print("{:.2f}€".format(waterfall.get_actor_income(producer)))
+
+
+def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) -> float:
+    waterfall.reset_income()
+    waterfall.take_from_income_as_negotiated(total_income)
+    actor_income = waterfall.get_actor_income(actor)
+    waterfall.reset_income
+    return actor_income
+
+
+incomes = np.arange(0.0, 10_000_000.0, 10000.0)
+producer_incomes = [get_actor_income(waterfall, x, producer) for x in incomes]
+plt.plot(incomes, producer_incomes)
+plt.xlabel('Recettes totales')
+plt.ylabel('Revenus du producteur')
+plt.title('Rémunération du producteur en fonction des recettes')
+plt.gca().yaxis.set_major_formatter(StrMethodFormatter('{x:,.2f}€'))
+plt.gca().xaxis.set_major_formatter(StrMethodFormatter('{x:,.2f}€'))
+plt.show()
