@@ -30,71 +30,70 @@ class Actor:
 
 class Slot:
     def __init__(self,
-                 negotiated_retribution: float,
-                 negotiated_margin: float,
+                 negotiated_percentage: float,
+                 cut_off: float,
                  actor: Actor) -> None:
-        assert negotiated_margin <= 1.0 and negotiated_margin >= 0.0
-        assert negotiated_retribution >= 0.0
+        assert negotiated_percentage >= 0.0 and negotiated_percentage <= 1.0
+        assert cut_off >= 0
         self.actor = actor
-        self.negotiated_retribution = negotiated_retribution
-        self.negotiated_margin = negotiated_margin
+        self.negotiated_percentage = negotiated_percentage
+        self.cut_off = cut_off
         self.income = 0.0
-        self.total_take = self.negotiated_retribution * \
-            (1 + self.negotiated_margin)
 
-    def take_from_income_as_negotiated(self, income: float) -> float:
-        if income > self.total_take:
-            self.income = self.total_take
-            return income - self.total_take
-        else:
-            self.income = income
-            return 0
+    def take_from_income_as_negotiated(self, income: float) -> None:
+        self.income = income
 
     def get_income(self) -> float:
         return self.income
 
+    def get_negotiated_percentage(self) -> float:
+        return self.negotiated_percentage
+
     def reset_income(self):
         self.income = 0.0
 
-    def get_total_take(self) -> float:
-        return self.total_take
+    def get_cut_off(self) -> float:
+        return self.cut_off
 
     def __str__(self) -> str:
-        return "{} ({:.2f}€/{:.2f}€+{:.0%})".format(self.actor, self.income, self.negotiated_retribution, self.negotiated_margin)
+        return "{} ({:.2f}€ avec un couloir de {:.2f})".format(self.actor, self.income, self.negotiated_percentage)
 
 
 class Slice:
     def __init__(self, slots: List[Slot]):
         self.slots = slots
         self.income = 0.0
-        self.total_take = sum([slot.get_total_take()
-                              for slot in self.slots])
+        self.max_cut_off_percented = max([slot.get_cut_off()/slot.get_negotiated_percentage()
+                                          for slot in self.slots])
 
     def take_from_income_as_negotiated(self, income: float) -> float:
-        if income > self.total_take:
-            # Then everybody can be served fully
-            for slot in self.slots:
-                income = slot.take_from_income_as_negotiated(income)
-            return income
+        total_income = income
+        if self.max_cut_off_percented > 0:
+            if income > self.max_cut_off_percented:
+                # Then everybody can be served fully
+                for slot in self.slots:
+                    slot_income = self.max_cut_off_percented * slot.get_negotiated_percentage()
+                    slot.take_from_income_as_negotiated(slot_income)
+                return total_income - self.max_cut_off_percented
+            else:
+                # The cut for each slot is proportional to their share in the
+                # total take of the slice
+                for slot in self.slots:
+                    slot_income = total_income * slot.get_negotiated_percentage()
+                    slot.take_from_income_as_negotiated(slot_income)
+                return 0
         else:
-            # The cut for each slot is proportional to their share in the
-            # total take of the slice
-            total_income = income
             for slot in self.slots:
-                slot_income = total_income * \
-                    (slot.get_total_take() / self.total_take)
-                income = slot.take_from_income_as_negotiated(slot_income)
-            return income
-
-    def get_total_take(self) -> float:
-        return self.total_take
+                slot_income = total_income * slot.get_negotiated_percentage()
+                slot.take_from_income_as_negotiated(slot_income)
+            return 0
 
     def reset_income(self):
         for slot in self.slots:
             slot.reset_income()
 
-    def __str__(self):
-        return " | ".join(["{}".format(slot) for slot in self.slots])
+    def get_max_cut_off_percented(self) -> float:
+        return self.max_cut_off_percented
 
     def get_actor_income(self, actor: Actor) -> float:
         actor_income = 0.0
@@ -103,15 +102,13 @@ class Slice:
                 actor_income += slot.income
         return actor_income
 
+    def __str__(self):
+        return " | ".join(["{}".format(slot) for slot in self.slots])
+
 
 class Waterfall:
     def __init__(self, slices: List[Slice]):
         self.slices = slices
-        self.total_take = sum([slice.get_total_take()
-                               for slice in self.slices])
-
-    def get_total_take(self) -> float:
-        return self.total_take
 
     def take_from_income_as_negotiated(self, income: float) -> float:
         for slice in self.slices:
@@ -122,14 +119,14 @@ class Waterfall:
         for slice in self.slices:
             slice.reset_income()
 
-    def __str__(self):
-        return "\n".join(["{}".format(slice) for slice in self.slices])
-
     def get_actor_income(self, actor: Actor) -> float:
         actor_income = 0.0
         for slice in self.slices:
             actor_income += slice.get_actor_income(actor)
         return actor_income
+
+    def __str__(self):
+        return "\n".join(["{}".format(slice) for slice in self.slices])
 
 
 distributor = Actor(break_even=100_000, name="Distributeur")
@@ -138,20 +135,19 @@ canal_plus = Actor(break_even=2_000_000, name="Canal+")
 sofica = Actor(break_even=500_000, name="SOFICA")
 
 first_slice = Slice(slots=[
-    Slot(actor=distributor, negotiated_retribution=100000, negotiated_margin=0.15)])
-second_slice = Slice(slots=[Slot(actor=producer, negotiated_retribution=1_000_000,
-                     negotiated_margin=0.0)])
-third_slice = Slice(slots=[Slot(actor=canal_plus, negotiated_retribution=2_000_000, negotiated_margin=0.2),
-                           Slot(actor=sofica, negotiated_retribution=500_000, negotiated_margin=0.04)])
-fourth_slice = Slice(slots=[Slot(
-    actor=producer, negotiated_retribution=1_000_000, negotiated_margin=0.10)])
+    Slot(actor=producer, cut_off=0.0, negotiated_percentage=0.15),
+    Slot(actor=distributor, cut_off=5000.0, negotiated_percentage=0.85)
+])
+second_slice = Slice(slots=[
+    Slot(actor=distributor, negotiated_percentage=0.15, cut_off=0.0),
+    Slot(actor=distributor, negotiated_percentage=0.75, cut_off=0.0),
+    Slot(actor=producer, negotiated_percentage=0.10, cut_off=0.0)])
 
 waterfall = Waterfall(
-    slices=[first_slice, second_slice, third_slice, fourth_slice])
+    slices=[first_slice, second_slice])
 
-# waterfall.take_from_income_as_negotiated(5_000_000)
-# print(waterfall)
-# print("{:.2f}€".format(waterfall.get_actor_income(producer)))
+waterfall.take_from_income_as_negotiated(100000)
+print(waterfall)
 
 
 def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) -> float:
@@ -163,11 +159,13 @@ def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) ->
 
 
 incomes = np.arange(0.0, 10_000_000.0, 10000.0)
-producer_incomes = [get_actor_income(waterfall, x, producer) for x in incomes]
+producer_incomes = [get_actor_income(
+    waterfall, x, distributor) for x in incomes]
 plt.plot(incomes, producer_incomes)
 plt.xlabel('Recettes totales')
 plt.ylabel('Revenus du producteur')
 plt.title('Rémunération du producteur en fonction des recettes')
-plt.gca().yaxis.set_major_formatter(StrMethodFormatter('{x:,.2f}€'))
-plt.gca().xaxis.set_major_formatter(StrMethodFormatter('{x:,.2f}€'))
+plt.gca().yaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
+plt.gca().xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
 plt.show()
+get_actor_income(waterfall, 100000, distributor)
