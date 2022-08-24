@@ -13,7 +13,7 @@
 #    limitations under the License.
 
 from tkinter import W
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import matplotlib.pyplot as plt  # type: ignore
 from matplotlib.ticker import StrMethodFormatter  # type: ignore
 import numpy as np
@@ -120,18 +120,22 @@ class FixedTotalIncomeSlice(Slice):
         return "["+" | ".join(["{}".format(slot) for slot in self.slots]) + "] max " + "∞ €" if self.max_total_income is None else "{: .2f}€".format(self.max_total_income)
 
 
-class OneActorCutoffSlice(FixedTotalIncomeSlice):
-    def __init__(self, cutoff_slot: Slot, cutoff: float, other_slots: List[Slot]):
-        self.cutoff_slot = cutoff_slot
-        self.cutoff = cutoff
+class SliceWithActorCutoffs(FixedTotalIncomeSlice):
+    def __init__(self, slots_with_cutoffs: List[Tuple[Slot, float]], other_slots: List[Slot]):
+        assert len(slots_with_cutoffs) > 0
+        self.slots_with_cutoffs = slots_with_cutoffs
+        self.other_slots = other_slots
 
-        self.slots = other_slots
-        self.slots.append(cutoff_slot)
-        self.max_total_income = cutoff / cutoff_slot.get_negotiated_percentage()
+        self.slots = [slot for (slot, _) in slots_with_cutoffs]
+        self.slots.extend(other_slots)
+        self.max_total_income = max([cutoff / cutoff_slot.get_negotiated_percentage()
+                                    for (cutoff_slot, cutoff) in slots_with_cutoffs])
         self.income = 0.0
 
     def __str__(self):
-        return "["+" | ".join(["{} max {:.2f}€".format(slot, self.cutoff) if slot == self.cutoff_slot else "{}".format(slot) for slot in self.slots]) + "]"
+        return "["+" | ".join(["{} max {:.2f}€".format(slot, cutoff) for (slot, cutoff) in self.slots_with_cutoffs]) + " | " + \
+            " | ".join(["{}".format(slot)
+                       for slot in self.other_slots]) + "]"
 
 
 class Waterfall:
@@ -189,9 +193,9 @@ producer = Actor(break_even=5_000_000, name="Producteur")
 canal_plus = Actor(break_even=2_000_000, name="Canal+")
 sofica = Actor(break_even=500_000, name="SOFICA")
 
-first_slice = OneActorCutoffSlice(
-    cutoff_slot=Slot(actor=distributor, negotiated_percentage=0.85),
-    cutoff=5000.0,
+first_slice = SliceWithActorCutoffs(
+    slots_with_cutoffs=[
+        (Slot(actor=distributor, negotiated_percentage=0.85), 5000.0)],
     other_slots=[
         Slot(actor=producer, negotiated_percentage=0.15),
     ])
