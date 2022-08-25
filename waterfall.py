@@ -131,11 +131,35 @@ class SliceWithActorCutoffs(FixedTotalIncomeSlice):
         self.max_total_income = max([cutoff / cutoff_slot.get_negotiated_percentage()
                                     for (cutoff_slot, cutoff) in slots_with_cutoffs])
         self.income = 0.0
+        assert sum([slot.get_negotiated_percentage() for slot in self.slots]) == 1.0
 
     def __str__(self):
         return "["+" | ".join(["{} max {:.2f}€".format(slot, cutoff) for (slot, cutoff) in self.slots_with_cutoffs]) + " | " + \
             " | ".join(["{}".format(slot)
                        for slot in self.other_slots]) + "]"
+
+
+class SlicePairedWithCutoffs(FixedTotalIncomeSlice):
+    def __init__(self, slot_with_cutoff: Slot, slots_outside: List[Slot], cut_off:float, other_slots: List[Slot]):
+        assert len(slots_outside) > 0
+
+        self.slot_with_cutoff = slot_with_cutoff
+        self.slots_outside = slots_outside
+        self.other_slots = other_slots
+        self.cut_off = cut_off
+        self.slots = other_slots
+        self.slots.append(slot_with_cutoff)
+
+        global_income = self.slot_with_cutoff.get_income()
+        for slot in self.slots_outside:
+            global_income += slot.get_income()
+
+        self.max_total_income = (self.cut_off - global_income)/self.slot_with_cutoff.get_negotiated_percentage()
+        self.income = 0.0
+        assert sum([slot.get_negotiated_percentage() for slot in self.slots]) == 1.0
+
+    def __str__(self):
+        return "["+" | ".join(["{}".format(slot) for slot in self.other_slots]) + "] ({}".format(self.slot_with_cutoff) + " paired with " + " | ".join(["{}".format(slot) for slot in self.slots_outside])+" with cutoff " + "{: .2f}€".format(self.cut_off)+")"
 
 
 class Waterfall:
@@ -193,26 +217,51 @@ producer = Actor(break_even=5_000_000, name="Producteur")
 canal_plus = Actor(break_even=2_000_000, name="Canal+")
 sofica = Actor(break_even=500_000, name="SOFICA")
 
-first_slice = SliceWithActorCutoffs(
-    slots_with_cutoffs=[
-        (Slot(actor=distributor, negotiated_percentage=0.85), 5000.0)],
+TV_control_slot_with_cutoff=Slot(actor=distributor, negotiated_percentage=0.20)
+cinema_control_slot_with_cutoff=Slot(actor=producer, negotiated_percentage=0.50)
+
+cinema_first_slice = SlicePairedWithCutoffs(
+    cinema_control_slot_with_cutoff,
+    slots_outside=[TV_control_slot_with_cutoff],
+    cut_off= 100.0,
     other_slots=[
-        Slot(actor=producer, negotiated_percentage=0.15),
+        Slot(actor=sofica, negotiated_percentage=0.10),
+        Slot(actor=canal_plus, negotiated_percentage=0.40)
     ])
-second_slice = FixedTotalIncomeSlice(slots=[
+cinema_second_slice = FixedTotalIncomeSlice(slots=[
     Slot(actor=distributor, negotiated_percentage=0.15),
     Slot(actor=distributor, negotiated_percentage=0.75),
     Slot(actor=producer, negotiated_percentage=0.10)],
     max_total_income=None)
 
+TV_first_slice = SlicePairedWithCutoffs(
+    TV_control_slot_with_cutoff,
+    slots_outside=[cinema_control_slot_with_cutoff],
+    cut_off= 100.0,
+    other_slots=[
+        Slot(actor=sofica, negotiated_percentage=0.50),
+        Slot(actor=canal_plus, negotiated_percentage=0.30)
+    ])
+TV_second_slice = FixedTotalIncomeSlice(slots=[
+    Slot(actor=distributor, negotiated_percentage=0.35),
+    Slot(actor=distributor, negotiated_percentage=0.25),
+    Slot(actor=producer, negotiated_percentage=0.40)],
+    max_total_income=None)
+
 cinema = Waterfall(name="Cinéma",
-                   slices=[first_slice, second_slice])
+                   slices=[cinema_first_slice, cinema_second_slice])
+
+TV = Waterfall(name="TV",
+                   slices=[TV_first_slice, TV_second_slice])
 
 movie = MovieRevenue(
-    waterfalls=[cinema]
+    waterfalls=[cinema, TV]
 )
 
 movie.distribute_income(cinema, 100000)
+movie.distribute_income(TV, 1000)
+movie.distribute_income(TV, 1000)
+
 print(movie)
 
 
@@ -224,17 +273,17 @@ def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) ->
     return actor_income
 
 
-incomes = np.arange(0.0, 10_000_000.0, 10000.0)
-producer_incomes = []
-for income in incomes:
-    movie.reset_income(cinema)
-    movie.distribute_income(cinema, income)
-    producer_incomes.append(movie.get_actor_income(producer))
-    movie.reset_income(cinema)
-plt.plot(incomes, producer_incomes)
-plt.xlabel('Recettes totales')
-plt.ylabel('Revenus du producteur')
-plt.title('Rémunération du producteur en fonction des recettes')
-plt.gca().yaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
-plt.gca().xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
-plt.show()
+#incomes = np.arange(0.0, 10_000_000.0, 10000.0)
+#producer_incomes = []
+#for income in incomes:
+#    movie.reset_income(cinema)
+#    movie.distribute_income(cinema, income)
+#    producer_incomes.append(movie.get_actor_income(producer))
+#    movie.reset_income(cinema)
+#plt.plot(incomes, producer_incomes)
+#plt.xlabel('Recettes totales')
+#plt.ylabel('Revenus du producteur')
+#plt.title('Rémunération du producteur en fonction des recettes')
+#plt.gca().yaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
+#plt.gca().xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
+#plt.show()
