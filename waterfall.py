@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt  # type: ignore
 from matplotlib.ticker import StrMethodFormatter  # type: ignore
 import numpy as np
 from abc import ABC, abstractmethod
+import math
 
 
 class Actor:
@@ -35,11 +36,13 @@ class Slot:
     # revenue that the Slot is entitled to.
     def __init__(self,
                  negotiated_percentage: float,
-                 actor: Actor) -> None:
+                 actor: Actor,
+                 name: str) -> None:
         assert negotiated_percentage >= 0.0 and negotiated_percentage <= 1.0
         self.actor = actor
         self.negotiated_percentage = negotiated_percentage
         self.income = 0.0
+        self.name = name
 
     # The slot will take all the income that's being given to him at the call.
     def take_income(self, income: float) -> None:
@@ -58,10 +61,14 @@ class Slot:
         self.income = 0.0
 
     def __str__(self) -> str:
-        return "{}: {:.2f}€/{:.0%}".format(self.actor, self.income, self.negotiated_percentage)
+        return "{} ({}): {:.2f}€/{:.0%}".format(self.actor, self.name, self.income, self.negotiated_percentage)
 
 
 class Slice(ABC):
+    @abstractmethod
+    def max_total_income(self) -> Optional[float]:
+        pass
+
     @abstractmethod
     def distribute_income(self, income: float) -> float:
         pass
@@ -78,10 +85,6 @@ class Slice(ABC):
     def __str__(self):
         pass
 
-    @abstractmethod
-    def assign_max_income(self):
-        pass
-
 
 class FixedTotalIncomeSlice(Slice):
     # If max_total_income is None then no limit to the slice's income
@@ -89,15 +92,20 @@ class FixedTotalIncomeSlice(Slice):
         assert (True if max_total_income is None else max_total_income >= 0.0)
         assert sum([slot.get_negotiated_percentage() for slot in slots]) == 1.0
         self.slots = slots
-        self.max_total_income = max_total_income
+        self.max_total_income_value = max_total_income
+        self.income = 0.0
+
+    def max_total_income(self):
+        return self.max_total_income_value
 
     def distribute_income(self, income: float) -> float:
-        max_income = self.assign_max_income()
+        distance_to_slice_max_total_income = self.get_distance_to_slice_max_total_income()
         original_income = income
-        if not (max_income is None) and income > max_income:
+        if (not (distance_to_slice_max_total_income is None)) and \
+                income > distance_to_slice_max_total_income:
             # Then everybody can be served fully
             for slot in self.slots:
-                slot_income = max_income * slot.get_negotiated_percentage()
+                slot_income = distance_to_slice_max_total_income * slot.get_negotiated_percentage()
                 slot.take_income(slot_income)
                 income -= slot_income
             return income
@@ -110,20 +118,21 @@ class FixedTotalIncomeSlice(Slice):
                 income -= slot_income
             return 0.0
 
-    def assign_max_income(self) -> float:
-        if self.max_total_income is None:
+    def get_distance_to_slice_max_total_income(self) -> Optional[float]:
+        if self.max_total_income() is None:
             return None
-
         else:
-            global_income=0.0
-            for slot in self.slots:
-                global_income+=slot.get_income()
-
-            return self.max_total_income - global_income
+            return self.max_total_income() - self.get_slice_income()
 
     def reset_income(self):
         for slot in self.slots:
             slot.reset_income()
+
+    def get_slice_income(self) -> float:
+        slice_income = 0.0
+        for slot in self.slots:
+            slice_income += slot.get_income()
+        return slice_income
 
     def get_actor_income(self, actor: Actor) -> float:
         actor_income = 0.0
@@ -133,67 +142,63 @@ class FixedTotalIncomeSlice(Slice):
         return actor_income
 
     def __str__(self):
-        return "["+" | ".join(["{}".format(slot) for slot in self.slots]) + ("] max " + "∞ €" if self.max_total_income is None else "] max{: .2f}€".format(self.max_total_income))
+        return "["+" | ".join(["{}".format(slot) for slot in self.slots]) + ("] max " + "∞ €" if self.max_total_income() is None else "] max{: .2f}€".format(self.max_total_income()))
 
 
-class SliceWithActorCutoffs(FixedTotalIncomeSlice):
-    def __init__(self, slots_with_cutoffs: List[Tuple[Slot, float]], other_slots: List[Slot]):
+class SliceWithSlotCutoffs(FixedTotalIncomeSlice):
+    def __init__(self, slots_with_cutoffs: List[Tuple[Slot, float]], other_slice_slots: List[Slot]):
         assert len(slots_with_cutoffs) > 0
+        # Properties for SliceWithActorCutoffs
         self.slots_with_cutoffs = slots_with_cutoffs
-        self.other_slots = other_slots
+        self.other_slice_slots = other_slice_slots
 
+        # Properties for FixedTotalIncomeSlice
+        self.income = 0
         self.slots = [slot for (slot, _) in slots_with_cutoffs]
-        self.slots.extend(other_slots)
-        self.max_total_income = max([cutoff / cutoff_slot.get_negotiated_percentage()
-                                    for (cutoff_slot, cutoff) in slots_with_cutoffs])
-        self.income = 0.0
-        #assert sum([slot.get_negotiated_percentage() for slot in self.slots]) == 1.0   
-
-
-    def assign_max_income(self) -> float:
-        max_total_income=0.0
-        max_income=0.0
-        for (cutoff_slot, cutoff) in self.slots_with_cutoffs:
-            if cutoff / cutoff_slot.get_negotiated_percentage() > max_total_income:
-                max_total_income=cutoff / cutoff_slot.get_negotiated_percentage()
-                max_income= max_total_income - cutoff_slot.get_income()/cutoff_slot.get_negotiated_percentage()
-                
-        return max_income
-    
+        self.slots.extend(other_slice_slots)
+        self.max_total_income_value = \
+            max([cutoff / cutoff_slot.get_negotiated_percentage()
+                 for (cutoff_slot, cutoff) in slots_with_cutoffs])
+        assert math.isclose(sum([slot.get_negotiated_percentage()
+                                 for slot in self.slots]), 1.0
+                            )
 
     def __str__(self):
-        return "["+" | ".join(["{} max {:.2f}€".format(slot, cutoff) for (slot, cutoff) in self.slots_with_cutoffs]) + " | " + \
+        return "["+" | ".join(["{} cutoff {:.2f}€".format(slot, cutoff) for (slot, cutoff) in self.slots_with_cutoffs]) + " | " + \
             " | ".join(["{}".format(slot)
-                       for slot in self.other_slots]) + "]"
-      
+                       for slot in self.other_slice_slots]) + "]"
 
-class SlicePairedWithCutoffs(FixedTotalIncomeSlice):
-    def __init__(self, slot_with_cutoff: Slot, slots_outside: List[Slot], cut_off:float, other_slots: List[Slot]):
-        assert len(slots_outside) > 0
 
+class SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(FixedTotalIncomeSlice):
+    def __init__(self, slot_with_cutoff: Slot, cut_off: float, foreign_slots: List[Slot],  other_slice_slots: List[Slot]):
+        # Properties for SliceWithOneCutoffSlotTakingIncomeFromForeignSlots
+        assert len(foreign_slots) > 0
         self.slot_with_cutoff = slot_with_cutoff
-        self.slots_outside = slots_outside
-        self.other_slots = other_slots
+        self.foreign_slots = foreign_slots
+        self.other_slice_slots = other_slice_slots
         self.cut_off = cut_off
-        self.slots = other_slots
+
+        # Properties for FixedTotalIncomeSlice
+        self.slots = other_slice_slots
         self.slots.append(slot_with_cutoff)
-        self.max_total_income = (self.cut_off)/self.slot_with_cutoff.get_negotiated_percentage()
         self.income = 0.0
-        assert sum([slot.get_negotiated_percentage() for slot in self.slots]) == 1.0   
+        assert math.isclose(sum([slot.get_negotiated_percentage()
+                                 for slot in self.slots]), 1.0
+                            )
 
-
-    def assign_max_income(self) -> float:
-        global_income = self.slot_with_cutoff.get_income()
-        for slot in self.slots_outside:
-            global_income += slot.get_income()
-
-        max_income = (self.cut_off - global_income)/self.slot_with_cutoff.get_negotiated_percentage()
-
+    def max_total_income(self) -> float:
+        income_counted_toward_cutoff = self.slot_with_cutoff.get_income()
+        for slot in self.foreign_slots:
+            income_counted_toward_cutoff += slot.get_income()
+        max_income = (self.cut_off - income_counted_toward_cutoff) / \
+            self.slot_with_cutoff.get_negotiated_percentage()
         return max_income
-    
-    
+
     def __str__(self):
-        return "["+" | ".join(["{}".format(slot) for slot in self.other_slots]) + "] ({}".format(self.slot_with_cutoff) + " paired with " + " | ".join(["{}".format(slot) for slot in self.slots_outside])+" with cutoff " + "{: .2f}€".format(self.cut_off)+")"
+        cutoff_slot_str = "{}".format(self.slot_with_cutoff) + " paired with [" + \
+            " | ".join(["{}".format(slot) for slot in self.foreign_slots]) + \
+            " with cutoff " + "{:.2f}€".format(self.cut_off) + "]"
+        return "["+" | ".join([cutoff_slot_str if slot == self.slot_with_cutoff else "{}".format(slot) for slot in self.slots]) + "]"
 
 
 class Waterfall:
@@ -252,66 +257,77 @@ canal_plus = Actor(break_even=2_000_000, name="Canal+")
 sofica = Actor(break_even=500_000, name="SOFICA")
 netflix = Actor(break_even=200_000, name="NETFLIX")
 
-TV_control_slot_with_cutoff=Slot(actor=distributor, negotiated_percentage=0.20)
-cinema_control_slot_with_cutoff=Slot(actor=producer, negotiated_percentage=0.50)
-netflix_control_slot_with_cutoff=Slot(actor=netflix, negotiated_percentage=1.0)
+tv_control_slot_with_cutoff = Slot(
+    actor=distributor, negotiated_percentage=0.20, name="contrôle")
+cinema_control_slot_with_cutoff = Slot(
+    actor=producer, negotiated_percentage=0.50, name="contrôle")
+netflix_control_slot_with_cutoff = Slot(
+    actor=netflix, negotiated_percentage=1.0, name="contrôle")
 
-cinema_first_slice = SlicePairedWithCutoffs(
-    cinema_control_slot_with_cutoff,
-    slots_outside=[TV_control_slot_with_cutoff, netflix_control_slot_with_cutoff],
-    cut_off= 100.0,
-    other_slots=[
-        Slot(actor=sofica, negotiated_percentage=0.10),
-        Slot(actor=canal_plus, negotiated_percentage=0.40)
+cinema_first_slice = SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(
+    slot_with_cutoff=cinema_control_slot_with_cutoff,
+    cut_off=100.0,
+    foreign_slots=[tv_control_slot_with_cutoff,
+                   netflix_control_slot_with_cutoff],
+    other_slice_slots=[
+        Slot(actor=sofica, negotiated_percentage=0.10, name="ciné"),
+        Slot(actor=canal_plus, negotiated_percentage=0.40, name="ciné")
     ])
-cinema_second_slice = SliceWithActorCutoffs(
-    [(Slot(actor=distributor, negotiated_percentage=0.2),100),
-     (Slot(actor=distributor, negotiated_percentage=0.7),20)],
-    [Slot(actor=sofica, negotiated_percentage=0.1)]
-    )
+cinema_second_slice = SliceWithSlotCutoffs(
+    slots_with_cutoffs=[(Slot(actor=distributor, negotiated_percentage=0.2, name="ciné#1"), 100),
+                        (Slot(actor=distributor, negotiated_percentage=0.7, name="ciné#2"), 20)],
+    other_slice_slots=[
+        Slot(actor=sofica, negotiated_percentage=0.1, name="ciné")]
+)
 
-TV_first_slice = SlicePairedWithCutoffs(
-    TV_control_slot_with_cutoff,
-    slots_outside=[cinema_control_slot_with_cutoff, netflix_control_slot_with_cutoff],
-    cut_off= 100.0,
-    other_slots=[
-        Slot(actor=sofica, negotiated_percentage=0.50),
-        Slot(actor=canal_plus, negotiated_percentage=0.30)
+tv_first_slice = SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(
+    slot_with_cutoff=tv_control_slot_with_cutoff,
+    cut_off=100.0,
+    foreign_slots=[cinema_control_slot_with_cutoff,
+                   netflix_control_slot_with_cutoff],
+    other_slice_slots=[
+        Slot(actor=sofica, negotiated_percentage=0.50, name="télé"),
+        Slot(actor=canal_plus, negotiated_percentage=0.30, name="télé")
     ])
 
-TV_second_slice = FixedTotalIncomeSlice(slots=[
-    Slot(actor=distributor, negotiated_percentage=0.35),
-    Slot(actor=distributor, negotiated_percentage=0.25),
-    Slot(actor=producer, negotiated_percentage=0.40)],
+tv_second_slice = FixedTotalIncomeSlice(slots=[
+    Slot(actor=distributor, negotiated_percentage=0.35, name="télé#1"),
+    Slot(actor=distributor, negotiated_percentage=0.25, name="télé#2"),
+    Slot(actor=producer, negotiated_percentage=0.40, name="télé")],
     max_total_income=None)
 
 platform_first_slice = FixedTotalIncomeSlice(
     slots=[netflix_control_slot_with_cutoff],
     max_total_income=100
-    )
+)
 
 cinema = Waterfall(name="Cinéma",
                    slices=[cinema_first_slice, cinema_second_slice])
 
-TV = Waterfall(name="TV",
-                   slices=[TV_first_slice, TV_second_slice])
+tv = Waterfall(name="TV",
+               slices=[tv_first_slice, tv_second_slice])
 
-platform = Waterfall(name="Platform",
+platform = Waterfall(name="Platforme",
                      slices=[platform_first_slice])
 
 
 movie = MovieRevenue(
-    waterfalls=[cinema, TV, platform]
+    waterfalls=[cinema, tv, platform]
 )
 
+print("== Initial ==\n", movie)
 movie.distribute_income(platform, 50)
-#movie.distribute_income(cinema, 200)
-#movie.distribute_income(cinema, 100)
-#movie.distribute_income(cinema, 100)
-##movie.distribute_income(TV, 100)
-#movie.distribute_income(TV, 1000)
-
-print(movie)
+print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
+movie.distribute_income(cinema, 200)
+print("== 200 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
+movie.distribute_income(cinema, 100)
+print("== 100 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
+movie.distribute_income(cinema, 300)
+print("== 300 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
+movie.distribute_income(tv, 100)
+print("== 100 € pour télé ==\n" + "{}".format(movie) + "\n\n")
+movie.distribute_income(tv, 1000)
+print("== 1000 € pour télé ==\n" + "{}".format(movie))
 
 
 def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) -> float:
@@ -322,17 +338,17 @@ def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) ->
     return actor_income
 
 
-#incomes = np.arange(0.0, 10_000_000.0, 10000.0)
-#producer_incomes = []
-#for income in incomes:
-#    movie.reset_income(cinema)
-#    movie.distribute_income(cinema, income)
-#    producer_incomes.append(movie.get_actor_income(producer))
-#    movie.reset_income(cinema)
-#plt.plot(incomes, producer_incomes)
-#plt.xlabel('Recettes totales')
-#plt.ylabel('Revenus du producteur')
-#plt.title('Rémunération du producteur en fonction des recettes')
-#plt.gca().yaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
-#plt.gca().xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
-#plt.show()
+# incomes = np.arange(0.0, 10_000_000.0, 10000.0)
+# producer_incomes = []
+# for income in incomes:
+#     movie.reset_income(cinema)
+#     movie.distribute_income(cinema, income)
+#     producer_incomes.append(movie.get_actor_income(producer))
+#     movie.reset_income(cinema)
+# plt.plot(incomes, producer_incomes)
+# plt.xlabel('Recettes totales')
+# plt.ylabel('Revenus du producteur')
+# plt.title('Rémunération du producteur en fonction des recettes')
+# plt.gca().yaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
+# plt.gca().xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}€'))
+# plt.show()
