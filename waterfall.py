@@ -187,7 +187,9 @@ class SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(FixedTotalIncomeSlice):
                             )
 
     def max_total_income(self) -> float:
-        income_counted_toward_cutoff = self.slot_with_cutoff.get_income()
+        # The max total income depends on the cutoff but also on the income
+        # already present in foreign slots!
+        income_counted_toward_cutoff = 0
         for slot in self.foreign_slots:
             income_counted_toward_cutoff += slot.get_income()
         max_income = (self.cut_off - income_counted_toward_cutoff) / \
