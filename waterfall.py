@@ -12,6 +12,7 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 
+from telnetlib import DO
 from tkinter import W
 from typing import List, Optional, Tuple
 import matplotlib.pyplot as plt  # type: ignore
@@ -320,7 +321,7 @@ movie = MovieRevenue(
 print("== Initial ==\n", movie)
 #movie.distribute_income(platform, 50)
 #print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
-movie.distribute_income(platform, 500)
+movie.distribute_income(cinema, 190)
 print("== 50 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
 #movie.distribute_income(cinema, 1000)
 #print("== 10 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
@@ -334,22 +335,32 @@ print("== 50 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
 def dichotomic_search(waterfall: Waterfall, slot:Slot, target:float , delta:float, max_x:float)->float:
     min_x = 0
     current_x = max_x / 2
-    waterfall.reset_income
+    waterfall.reset_income()
     waterfall.distribute_income(current_x)
     while slot.get_income() < target - delta or slot.get_income() > target + delta :
-      if  slot.get_income() < target - delta:
+      if  slot.get_income() > target + delta:
          max_x = current_x
          current_x = (max_x + min_x) / 2 
-         waterfall.reset_income
+         waterfall.reset_income()
          waterfall.distribute_income(current_x)
       else:
          min_x = current_x
          current_x =  (max_x + min_x) / 2
-         waterfall.reset_income
-         waterfall.distribute_income(current_x)
-    return current_x
+         waterfall.reset_income()
+         waterfall.distribute_income(current_x) 
+    
+    target_approx = slot.get_income()
+    waterfall.reset_income()
+    current_x = 0
 
-a=dichotomic_search(platform, netflix_control_slot_with_cutoff, 30.0, 5.0, 80.0)
+    while slot.get_income() < target_approx:
+        current_x += 1.0
+        waterfall.reset_income()
+        waterfall.distribute_income(current_x)
+    return current_x
+    
+
+a=dichotomic_search(cinema, cinema_control_slot_with_cutoff, 100.0, 0.5, 900.0)
 print(a)
 
 def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) -> float:
