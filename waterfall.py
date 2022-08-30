@@ -18,8 +18,21 @@ from typing import List, Optional, Tuple
 import matplotlib.pyplot as plt  # type: ignore
 from matplotlib.ticker import StrMethodFormatter  # type: ignore
 import numpy as np
+from math import floor
 from abc import ABC, abstractmethod
 import math
+
+
+#### MOVIE INDUSTRIE SPECIFICATION
+tsa = 0.107
+admission_price = 6.15
+distributor_theater_ratio = 0.5
+
+def tickets_to_income(tickets:float) -> float:
+    return tickets*admission_price*(1-tsa)*distributor_theater_ratio
+    
+def income_to_tickets(income:float) -> float:
+    return floor(income/(admission_price*(1-tsa)*distributor_theater_ratio))
 
 
 class Actor:
@@ -203,7 +216,33 @@ class SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(FixedTotalIncomeSlice):
             " with cutoff " + "{:.2f}€".format(self.cut_off) + "]"
         return "["+" | ".join([cutoff_slot_str if slot == self.slot_with_cutoff else "{}".format(slot) for slot in self.slots]) + "]"
 
+class SliceWithTicketsCutoff(FixedTotalIncomeSlice):
+    def __init__(self, slots: List[Slot], slices:List[Slice], tickets_cut_off:float):
+        # Properties for SliceWithTicketsCutoff
+        assert len(slots) > 0
+        self.tickets_cut_off = tickets_cut_off
+        self.global_income_cut_off = tickets_to_income(self.tickets_cut_off)
+        self.slices=slices
 
+        # Properties for FixedTotalIncomeSlice
+        self.slots = slots
+        self.income = 0.0
+        assert math.isclose(sum([slot.get_negotiated_percentage()
+                                 for slot in self.slots]), 1.0
+                            )
+
+    def max_total_income(self) -> float:
+        # The max total income depends on the tickets_cut_off
+
+        income_counted_toward_cutoff = 0
+        for slice in self.slices:
+            income_counted_toward_cutoff += slice.get_slice_income()
+        max_income = (self.global_income_cut_off - income_counted_toward_cutoff)
+        return max_income
+
+    def __str__(self):
+        return "["+" | ".join(["{}".format(slot) for slot in self.slots]) + "] max{: .2f} entrées ".format(self.tickets_cut_off) + "/{: .2f} €".format(self.global_income_cut_off)
+                                                                                                     
 class Waterfall:
     def __init__(self, name: str, slices: List[Slice]):
         self.slices = slices
@@ -276,11 +315,18 @@ cinema_first_slice = SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(
         Slot(actor=sofica, negotiated_percentage=0.10, name="ciné"),
         Slot(actor=canal_plus, negotiated_percentage=0.40, name="ciné")
     ])
-cinema_second_slice = SliceWithSlotCutoffs(
-    slots_with_cutoffs=[(Slot(actor=distributor, negotiated_percentage=0.2, name="ciné#1"), 100),
-                        (Slot(actor=distributor, negotiated_percentage=0.7, name="ciné#2"), 20)],
-    other_slice_slots=[
-        Slot(actor=sofica, negotiated_percentage=0.1, name="ciné")]
+cinema_second_slice = SliceWithTicketsCutoff(
+    slots=[Slot(actor=distributor, negotiated_percentage=0.2, name="ciné#1"),
+                        Slot(actor=distributor, negotiated_percentage=0.7, name="ciné#2"),
+                        Slot(actor=sofica, negotiated_percentage=0.1, name="ciné")],
+    slices=[cinema_first_slice],
+    tickets_cut_off = 1000
+)
+cinema_third_slice = FixedTotalIncomeSlice(
+    slots=[Slot(actor=producer, negotiated_percentage=0.3, name="ciné"),
+           Slot(actor=distributor, negotiated_percentage=0.3, name="ciné"),
+           Slot(actor=sofica, negotiated_percentage=0.4, name="ciné")],
+    max_total_income=None
 )
 
 tv_first_slice = SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(
@@ -305,7 +351,7 @@ platform_first_slice = FixedTotalIncomeSlice(
 )
 
 cinema = Waterfall(name="Cinéma",
-                   slices=[cinema_first_slice, cinema_second_slice])
+                   slices=[cinema_first_slice, cinema_second_slice, cinema_third_slice])
 
 tv = Waterfall(name="TV",
                slices=[tv_first_slice, tv_second_slice])
@@ -321,10 +367,10 @@ movie = MovieRevenue(
 print("== Initial ==\n", movie)
 #movie.distribute_income(platform, 50)
 #print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
-movie.distribute_income(cinema, 190)
-print("== 50 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
-#movie.distribute_income(cinema, 1000)
-#print("== 10 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
+movie.distribute_income(cinema, 1000)
+print("== 1000 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
+movie.distribute_income(cinema, 2500)
+print("== 2500 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
 #movie.distribute_income(cinema, 300)
 #print("== 300 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
 #movie.distribute_income(tv, 100)
@@ -358,11 +404,14 @@ def dichotomic_search(waterfall: Waterfall, slot:Slot, target:float , delta:floa
         waterfall.reset_income()
         waterfall.distribute_income(current_x)
     return current_x
-    
 
-a=dichotomic_search(cinema, cinema_control_slot_with_cutoff, 100.0, 0.5, 900.0)
+
+
+a=dichotomic_search(cinema, cinema_control_slot_with_cutoff, 100.0, 0.5, 5000.0)
 print(a)
 
+#print(tickets_to_income(1000))
+#print(income_to_tickets(100000))
 def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) -> float:
     waterfall.reset_income()
     waterfall.distribute_income(total_income)
