@@ -331,7 +331,31 @@ class SliceWithTicketsCutoff(FixedTotalIncomeSlice):
 
     def __str__(self):
         return "["+" | ".join(["{}".format(slot) for slot in self.slots]) + "] max{: .2f} entrées ".format(self.tickets_cut_off) + "/{: .2f} €".format(self.global_income_cut_off)
-                                                                                                     
+                            
+class SliceWithFillingForeignSlicesConditions(FixedTotalIncomeSlice):
+    def __init__(self, slots: List[Slot], slices:List[Slice]):
+        # Properties for WithFillingForeignSlicesConditions
+        assert len(slots) > 0
+        self.slices=slices
+
+        # Properties for FixedTotalIncomeSlice
+        self.slots = slots
+        self.income = 0.0
+        assert math.isclose(sum([slot.get_negotiated_percentage()
+                                 for slot in self.slots]), 1.0
+                            )
+
+    def max_total_income(self) -> float:
+        # The max total income depends on filling the other slices
+        for slice in self.slices:
+            if not(slice.get_distance_to_slice_max_total_income()==0 or slice.get_distance_to_slice_max_total_income()==None):
+                return None
+
+        return self.get_slice_income()
+
+    def __str__(self):
+        return "["+" | ".join(["{}".format(slot) for slot in self.slots]) + "] si " + " | ".join(["{}".format(slice) for slice in self.slices]) +" remplie.s"
+
 class Waterfall:
     def __init__(self, name: str, slices: List[Slice]):
         self.slices = slices
@@ -422,6 +446,24 @@ cinema_control_slot_with_cutoff = Slot(
 netflix_control_slot_with_cutoff = Slot(
     actor=netflix, negotiated_percentage=1.0, name="contrôle")
 
+platform_first_slice = FixedTotalIncomeSlice(
+    slots=[netflix_control_slot_with_cutoff],
+    max_total_income=100
+)
+
+soutien_prod_slice1 = FixedTotalIncomeSlice(
+    slots=[Slot(actor=producer, negotiated_percentage=0.5, name="prod 1"),
+           Slot(actor=producer, negotiated_percentage=0.5, name="prod 2")],
+    max_total_income=150000
+)
+
+soutien_prod_slice2 = FixedTotalIncomeSlice(
+    slots=[Slot(actor=producer, negotiated_percentage=0.4, name="prod 1"),
+           Slot(actor=producer, negotiated_percentage=0.4, name="prod 2"),
+           Slot(actor=distributor, negotiated_percentage=0.2, name="distrib")],
+    max_total_income=None
+)
+
 cinema_first_slice = SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(
     slot_with_cutoff=cinema_control_slot_with_cutoff,
     cut_off=100.0,
@@ -438,23 +480,16 @@ cinema_second_slice = SliceWithTicketsCutoff(
     slices=[cinema_first_slice],
     tickets_cut_off = 1000
 )
-cinema_third_slice = FixedTotalIncomeSlice(
+cinema_third_slice = SliceWithFillingForeignSlicesConditions(
+    slots=[Slot(actor=producer, negotiated_percentage=0.1, name="ciné"),
+           Slot(actor=distributor, negotiated_percentage=0.9, name="ciné")],
+    slices=[platform_first_slice, soutien_prod_slice1]
+)
+
+cinema_fourth_slice = FixedTotalIncomeSlice(
     slots=[Slot(actor=producer, negotiated_percentage=0.3, name="ciné"),
            Slot(actor=distributor, negotiated_percentage=0.3, name="ciné"),
            Slot(actor=sofica, negotiated_percentage=0.4, name="ciné")],
-    max_total_income=None
-)
-
-soutien_prod_slice1 = FixedTotalIncomeSlice(
-    slots=[Slot(actor=producer, negotiated_percentage=0.5, name="prod 1"),
-           Slot(actor=producer, negotiated_percentage=0.5, name="prod 2")],
-    max_total_income=150000
-)
-
-soutien_prod_slice2 = FixedTotalIncomeSlice(
-    slots=[Slot(actor=producer, negotiated_percentage=0.4, name="prod 1"),
-           Slot(actor=producer, negotiated_percentage=0.4, name="prod 2"),
-           Slot(actor=distributor, negotiated_percentage=0.2, name="distrib")],
     max_total_income=None
 )
 
@@ -479,13 +514,8 @@ tv_second_slice = FixedTotalIncomeSlice(slots=[
     Slot(actor=producer, negotiated_percentage=0.40, name="télé")],
     max_total_income=None)
 
-platform_first_slice = FixedTotalIncomeSlice(
-    slots=[netflix_control_slot_with_cutoff],
-    max_total_income=100
-)
-
 cinema = Waterfall(name="Cinéma",
-                   slices=[cinema_first_slice, cinema_second_slice, cinema_third_slice])
+                   slices=[cinema_first_slice, cinema_second_slice, cinema_third_slice, cinema_fourth_slice])
 
 soutien_prod = Waterfall(name="SP",
                    slices=[soutien_prod_slice1, soutien_prod_slice2])
@@ -504,23 +534,16 @@ movie = MovieRevenue(
     waterfalls=[cinema, tv, platform, soutien_prod, soutien_distrib]
 )
 
-#print("== Initial ==\n", movie)
-#movie.distribute_income(soutien_prod, 100_000)
-#print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
-#movie.distribute_income(soutien_prod, 1_000_000)
-#print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
-#movie.distribute_income(soutien_prod, 10_000_000)
-#print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
+print("== Initial ==\n", movie)
+movie.distribute_income(cinema, 1_000_000)
+print("== 1 ==\n", movie)
+movie.distribute_income(platform, 1000)
+movie.distribute_income(soutien_prod, 800_000)
+print("== 2 ==\n", movie)
+movie.distribute_income(cinema, 100)
+print("== 3 ==\n", movie)
 #movie.distribute_income(soutien_distrib, 50)
-#print("== 100 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
-#movie.distribute_income(soutien_prod, 50)
-#print("== 2500 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
-#movie.distribute_income(cinema, 300)
-#print("== 300 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
-#movie.distribute_income(tv, 100)
-#print("== 100 € pour télé ==\n" + "{}".format(movie) + "\n\n")
-#movie.distribute_income(tv, 1000)
-#print("== 1000 € pour télé ==\n" + "{}".format(movie))
+
 
 #print(tickets_to_income(1500000))
 #print(income_to_tickets(11_100_000))
