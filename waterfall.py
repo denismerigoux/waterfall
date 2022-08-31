@@ -12,6 +12,7 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 
+from pickle import NONE
 from telnetlib import DO
 from tkinter import W
 from typing import List, Optional, Tuple
@@ -27,6 +28,8 @@ import math
 tsa = 0.107
 admission_price = 6.15
 distributor_theater_ratio = 0.5
+bareme_soutien_prod=1.0
+bareme_soutien_distrib=1.0
 
 def tickets_to_income(tickets:float) -> float:
     return tickets*admission_price*(1-tsa)*distributor_theater_ratio
@@ -34,7 +37,93 @@ def tickets_to_income(tickets:float) -> float:
 def income_to_tickets(income:float) -> float:
     return floor(income/(admission_price*(1-tsa)*distributor_theater_ratio))
 
+def tickets_to_soutien_prod(tickets:float) -> float:
+    coeff_global=float(tsa*bareme_soutien_prod*admission_price)
+    seuil_1=1.1187*coeff_global*1_499_999
+    seuil_2=(1.1187*1_499_999+0.8502*(4_999_999-1_499_999))*coeff_global
 
+    if tickets < 1_500_000:
+        return 1.1187*coeff_global*tickets
+    else:
+        if tickets>=1_500_000 and tickets<5_000_000:
+            return seuil_1+0.8502*coeff_global*(tickets-1_499_999)
+        else:
+            if tickets>=5_000_000:
+                return seuil_2+0.0895*coeff_global*(tickets-4_999_999)
+
+def tickets_to_soutien_distrib(tickets:float)->float:
+    coeff_global=tsa*bareme_soutien_distrib*admission_price
+    seuil_1=2.0836*coeff_global*49_999
+    seuil_2=seuil_1+coeff_global*1.3259*(99_999-49_999)
+    seuil_3=seuil_2+coeff_global*1.1365*(199_999-99_999)
+    seuil_4=seuil_3+coeff_global*0.4735*(499_999-199_999)
+    seuil_5=seuil_4+coeff_global*0.2841*(699_999-499_999)
+    seuil_6=seuil_5+coeff_global*0.0947*(999_999-699_999)
+
+    if tickets < 50_000:
+        return 2.0836*coeff_global*tickets
+    else:
+        if tickets>=50_000 and tickets<100_000:
+            return seuil_1+1.3259*coeff_global*(tickets-49_999)
+        else:
+            if tickets>=100_000 and tickets<200_000:
+                return seuil_2+1.1365*coeff_global*(tickets-99_999)
+            else:
+                if tickets>=200_000 and tickets<500_000:
+                    return seuil_3+0.4735*coeff_global*(tickets-199_999)
+                else:
+                    if tickets>=500_000 and tickets<700_000:
+                        return seuil_4+0.2841*coeff_global*(tickets-499_999)
+                    else:
+                        if tickets>=700_000 and tickets<1_000_000:
+                            return seuil_5+0.0947*coeff_global*(tickets-699_999)
+                        else:
+                            if tickets>=1_000_000:
+                                return seuil_6
+
+def soutien_prod_to_tickets(soutien_prod:float)->float:
+    coeff_global=tsa*bareme_soutien_distrib*admission_price
+    seuil_1=1.1187*coeff_global*1_499_999
+    seuil_2=seuil_1+0.8502*coeff_global*(4_999_999-1_499_999)
+
+    if soutien_prod>seuil_2:
+        return floor((soutien_prod-seuil_2+coeff_global*0.0895*4_999_999)/(0.0895*coeff_global))
+    else:
+        if soutien_prod>seuil_1:
+            return floor((soutien_prod-seuil_1+coeff_global*0.8502*1_499_999)/(coeff_global*0.8502))
+        else:
+            return floor(soutien_prod/(1.1187*coeff_global))
+
+def soutien_distrib_to_tickets(soutien_distrib:float)->float:
+    coeff_global=tsa*bareme_soutien_distrib*admission_price 
+    seuil_1=2.0836*coeff_global*49_999
+    seuil_2=seuil_1+coeff_global*1.3259*(99_999-49_999)
+    seuil_3=seuil_2+coeff_global*1.1365*(199_999-99_999)
+    seuil_4=seuil_3+coeff_global*0.4735*(499_999-199_999)
+    seuil_5=seuil_4+coeff_global*0.2841*(699_999-499_999)
+    seuil_6=seuil_5+coeff_global*0.0947*(999_999-699_999)
+
+    if soutien_distrib>seuil_6:
+        return 1_000_000
+    else:
+        if soutien_distrib>seuil_5:
+            return floor((soutien_distrib-seuil_5+coeff_global*0.0947*699_999)/(coeff_global*0.0947))
+        else:
+            if soutien_distrib>seuil_4:
+                return floor((soutien_distrib-seuil_4+coeff_global*0.2841*499_999)/(coeff_global*0.2841))
+            else:
+                if soutien_distrib>seuil_3:
+                    return floor((soutien_distrib-seuil_3+coeff_global*0.4735*199_999)/(coeff_global*0.4735))
+                else:
+                    if soutien_distrib>seuil_2: 
+                        return floor((soutien_distrib-seuil_2+coeff_global*1.1365*99_999)/(coeff_global*1.1365))
+                    else:
+                        if soutien_distrib>seuil_1: 
+                            return floor((soutien_distrib-seuil_1+coeff_global*1.3259*49_999)/(coeff_global*1.3259))
+                        else:
+                            return floor(soutien_distrib/(coeff_global*2.0836))
+             
+        
 class Actor:
     def __init__(self, break_even: float, name: str):
         assert break_even >= 0.0
@@ -253,6 +342,12 @@ class Waterfall:
             income = slice.distribute_income(income)
         return income
 
+    def get_waterfall_income(self):
+        waterfall_income = 0.0
+        for slice in self.slices:
+            waterfall_income += slice.get_slice_income()
+        return waterfall_income
+
     def reset_income(self):
         for slice in self.slices:
             slice.reset_income()
@@ -280,8 +375,29 @@ class MovieRevenue:
     def distribute_income(self, target_waterfall: Waterfall, income: float) -> float:
         for waterfall in self.waterfalls:
             if waterfall == target_waterfall:
-                new_income = waterfall.distribute_income(income)
-                return new_income
+                if waterfall == soutien_prod:
+                   old_soutien_prod=waterfall.get_waterfall_income()
+                   old_tickets=soutien_prod_to_tickets(old_soutien_prod)
+                   new_tickets=income_to_tickets(income)
+                   total_tickets=old_tickets+new_tickets    
+                   total_soutien_prod=tickets_to_soutien_prod(total_tickets)
+                   new_soutien_prod = total_soutien_prod-old_soutien_prod
+                   new_soutien_prod = waterfall.distribute_income(new_soutien_prod) 
+                   return new_soutien_prod
+                else:
+                    if waterfall == soutien_distrib:
+                        old_soutien_distrib=waterfall.get_waterfall_income()
+                        old_tickets=soutien_distrib_to_tickets(old_soutien_distrib)
+                        new_tickets=income_to_tickets(income)
+                        total_tickets=old_tickets+new_tickets    
+                        total_soutien_distrib=tickets_to_soutien_distrib(total_tickets)
+                        new_soutien_distrib = total_soutien_distrib-old_soutien_distrib
+                        new_soutien_distrib = waterfall.distribute_income(new_soutien_distrib) 
+                        return new_soutien_distrib
+                        
+                    else:
+                        new_income = waterfall.distribute_income(income) 
+                        return new_income
         return income
 
     def reset_income(self, target_waterfall: Waterfall):
@@ -329,6 +445,24 @@ cinema_third_slice = FixedTotalIncomeSlice(
     max_total_income=None
 )
 
+soutien_prod_slice1 = FixedTotalIncomeSlice(
+    slots=[Slot(actor=producer, negotiated_percentage=0.5, name="prod 1"),
+           Slot(actor=producer, negotiated_percentage=0.5, name="prod 2")],
+    max_total_income=150000
+)
+
+soutien_prod_slice2 = FixedTotalIncomeSlice(
+    slots=[Slot(actor=producer, negotiated_percentage=0.4, name="prod 1"),
+           Slot(actor=producer, negotiated_percentage=0.4, name="prod 2"),
+           Slot(actor=distributor, negotiated_percentage=0.2, name="distrib")],
+    max_total_income=None
+)
+
+soutien_distrib_slice1 = FixedTotalIncomeSlice(
+    slots=[Slot(actor=distributor, negotiated_percentage=1.0, name="distrib")],
+    max_total_income=None
+)
+
 tv_first_slice = SliceWithOneCutoffSlotTakingIncomeFromForeignSlots(
     slot_with_cutoff=tv_control_slot_with_cutoff,
     cut_off=100.0,
@@ -353,6 +487,12 @@ platform_first_slice = FixedTotalIncomeSlice(
 cinema = Waterfall(name="Cinéma",
                    slices=[cinema_first_slice, cinema_second_slice, cinema_third_slice])
 
+soutien_prod = Waterfall(name="SP",
+                   slices=[soutien_prod_slice1, soutien_prod_slice2])
+
+soutien_distrib = Waterfall(name="SD",
+                            slices=[soutien_distrib_slice1])
+
 tv = Waterfall(name="TV",
                slices=[tv_first_slice, tv_second_slice])
 
@@ -361,22 +501,29 @@ platform = Waterfall(name="Platforme",
 
 
 movie = MovieRevenue(
-    waterfalls=[cinema, tv, platform]
+    waterfalls=[cinema, tv, platform, soutien_prod, soutien_distrib]
 )
 
-print("== Initial ==\n", movie)
-#movie.distribute_income(platform, 50)
+#print("== Initial ==\n", movie)
+#movie.distribute_income(soutien_prod, 100_000)
 #print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
-movie.distribute_income(cinema, 1000)
-print("== 1000 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
-movie.distribute_income(cinema, 2500)
-print("== 2500 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
+#movie.distribute_income(soutien_prod, 1_000_000)
+#print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
+#movie.distribute_income(soutien_prod, 10_000_000)
+#print("== 50 € pour plateforme ==\n" + "{}".format(movie) + "\n\n")
+#movie.distribute_income(soutien_distrib, 50)
+#print("== 100 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
+#movie.distribute_income(soutien_prod, 50)
+#print("== 2500 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
 #movie.distribute_income(cinema, 300)
 #print("== 300 € pour cinéma ==\n" + "{}".format(movie) + "\n\n")
 #movie.distribute_income(tv, 100)
 #print("== 100 € pour télé ==\n" + "{}".format(movie) + "\n\n")
 #movie.distribute_income(tv, 1000)
 #print("== 1000 € pour télé ==\n" + "{}".format(movie))
+
+#print(tickets_to_income(1500000))
+#print(income_to_tickets(11_100_000))
 
 def dichotomic_search(waterfall: Waterfall, slot:Slot, target:float , delta:float, max_x:float)->float:
     min_x = 0
@@ -406,12 +553,11 @@ def dichotomic_search(waterfall: Waterfall, slot:Slot, target:float , delta:floa
     return current_x
 
 
+#a=dichotomic_search(cinema, cinema_control_slot_with_cutoff, 100.0, 0.5, 5000.0)
+#print(a)
 
-a=dichotomic_search(cinema, cinema_control_slot_with_cutoff, 100.0, 0.5, 5000.0)
-print(a)
 
-#print(tickets_to_income(1000))
-#print(income_to_tickets(100000))
+
 def get_actor_income(waterfall: Waterfall, total_income: float, actor: Actor) -> float:
     waterfall.reset_income()
     waterfall.distribute_income(total_income)
