@@ -1,0 +1,22 @@
+(lang dune 3.3)
+
+(name waterfall)
+
+(generate_opam_files true)
+
+(source
+ (github denismerigoux/waterfall))
+
+(authors "Denis Merigoux")
+
+(maintainers "Denis Merigoux")
+
+(license Apache-2.0)
+
+(package
+ (name waterfall)
+ (synopsis "A short synopsis")
+ (description "A longer description")
+ (depends ocaml dune))
+
+; See the complete stanza docs at https://dune.readthedocs.io/en/stable/dune-files.html#dune-project
