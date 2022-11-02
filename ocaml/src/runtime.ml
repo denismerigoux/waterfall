@@ -3,10 +3,21 @@ type money = Z.t
 
 let sub_money (x : money) (y : money) = Z.(x - y)
 let add_money (x : money) (y : money) = Z.(x + y)
+let money_from_units i = Z.(of_int i * of_int 100)
+let money_from_cents i = Z.of_int i
 let zero_money = Z.zero
+
+let format_money (fmt : Format.formatter) (m : money) =
+  Format.fprintf fmt "%s €" (Q.to_string Q.(of_bigint m / of_int 100))
 
 type share = Q.t
 (** Fraction between 0 and 1*)
+
+let format_share (fmt : Format.formatter) (s : share) =
+  Format.fprintf fmt "%s" (Q.to_string s)
+
+let share_from_float f = Q.of_float f
+let share_from_percentage p = Q.(of_int p / of_int 100)
 
 let multiply_money (i1 : money) (i2 : share) : money =
   let i1_abs = Z.abs i1 in
@@ -23,23 +34,25 @@ let multiply_money (i1 : money) (i2 : share) : money =
 module VertexId : sig
   type t
 
-  val fresh : unit -> t
+  val fresh : string -> t
   val compare : t -> t -> int
   val equal : t -> t -> bool
   val hash : t -> int
+  val format : Format.formatter -> t -> unit
 end = struct
-  type t = int
+  type t = string * int
 
   let counter = ref 0
 
-  let fresh () =
+  let fresh msg =
     let id = !counter in
     incr counter;
-    id
+    msg, id
 
-  let hash x = x
-  let equal x y = compare x y = 0
-  let compare x y = compare x y
+  let hash x = snd x
+  let equal x y = compare (snd x) (snd y) = 0
+  let compare x y = compare (snd x) (snd y)
+  let format fmt x = Format.fprintf fmt "%s_%d" (fst x) (snd x)
 end
 
 module VertexMap = Map.Make (VertexId)
@@ -52,7 +65,7 @@ type filling_condition =
   | CrossCollateralization of filling_condition * VertexSet.t
 
 module Vertex = struct
-  type t = { id : VertexId.t; filling_condition : filling_condition }
+  type t = { id : VertexId.t; filling_condition : filling_condition option }
 
   let compare x y = VertexId.compare x.id y.id
   let hash x = VertexId.hash x.id
@@ -80,7 +93,7 @@ let rec interpret_filling_condition
     (c : filling_condition) : filling_state =
   match c with
   | Cutoff cutoff ->
-    if cutoff >= current_fill then Full
+    if cutoff <= current_fill then Full
     else Remaining (sub_money cutoff current_fill)
   | Conjunction (c1, c2) -> (
     match
@@ -129,10 +142,19 @@ let check_control_edges (g : WaterfallGraph.t) : bool =
          in
          not
            (VertexSet.equal control_vertices
-              (used_vertices v.filling_condition)))
+              (used_vertices
+                 (Option.value
+                    ~default:(Cutoff (money_from_units 0))
+                    v.filling_condition))))
        g false)
 
 module MoneyGraphSCC = Graph.Components.Make (WaterfallGraph)
+
+let format_state fmt state =
+  VertexMap.iter
+    (fun v m ->
+      Format.fprintf fmt "%a -> %a\n" VertexId.format v format_money m)
+    state
 
 let check_no_cycle (g : WaterfallGraph.t) : bool =
   (* we only check for cycles in the money flow, control edges can cycle *)
@@ -202,46 +224,53 @@ let add_money_to_graph
             g v None
         in
         let input : money = VertexMap.find v.id inputs in
-        match
-          interpret_filling_condition state
-            (VertexMap.find v.id state)
-            v.Vertex.filling_condition
-        with
-        | Remaining remaining ->
-          let underflow_vertices =
-            WaterfallGraph.fold_succ_e
-              (fun e acc ->
-                match WaterfallGraph.E.label e with
-                | MoneyFlow (Underflow share) ->
-                  VertexMap.add (WaterfallGraph.E.dst e).id share acc
-                | _ -> acc)
-              g v VertexMap.empty
-          in
-          let to_underflow = if input > remaining then remaining else input in
-          let to_overflow =
-            if input > remaining then Some (sub_money input remaining) else None
-          in
-          let new_state = aggregate_money state v.id to_underflow in
-          let new_inputs =
-            VertexMap.fold
-              (fun underflow_v share new_inputs ->
-                aggregate_money new_inputs underflow_v
-                  (multiply_money to_underflow share))
-              underflow_vertices inputs
-          in
-          let new_inputs =
-            match overflow_vertex, to_overflow with
-            | Some overflow_vertex, Some to_overflow ->
-              aggregate_money new_inputs overflow_vertex.id to_overflow
-            | None, None -> new_inputs
-            | _ -> failwith "inconsistent state!"
-          in
-          new_state, new_inputs
-        | Full -> (
-          match overflow_vertex with
-          | None -> failwith "node full but no overflow sucessor!"
-          | Some overflow_vertex ->
-            state, aggregate_money inputs overflow_vertex.id input))
+        match v.Vertex.filling_condition with
+        | None ->
+          (* we stash up money in there, it's a sink*)
+          aggregate_money state v.id input, inputs
+        | Some filling_condition -> (
+          match
+            interpret_filling_condition state
+              (VertexMap.find v.id state)
+              filling_condition
+          with
+          | Remaining remaining ->
+            let underflow_vertices =
+              WaterfallGraph.fold_succ_e
+                (fun e acc ->
+                  match WaterfallGraph.E.label e with
+                  | MoneyFlow (Underflow share) ->
+                    VertexMap.add (WaterfallGraph.E.dst e).id share acc
+                  | _ -> acc)
+                g v VertexMap.empty
+            in
+            let to_underflow = if input > remaining then remaining else input in
+            let to_overflow =
+              if input > remaining then Some (sub_money input remaining)
+              else None
+            in
+
+            let new_state = aggregate_money state v.id to_underflow in
+            let new_inputs =
+              VertexMap.fold
+                (fun underflow_v share new_inputs ->
+                  aggregate_money new_inputs underflow_v
+                    (multiply_money to_underflow share))
+                underflow_vertices inputs
+            in
+            let new_inputs =
+              match overflow_vertex, to_overflow with
+              | Some overflow_vertex, Some to_overflow ->
+                aggregate_money new_inputs overflow_vertex.id to_overflow
+              | None, None | Some _, None -> new_inputs
+              | None, Some _ -> failwith "inconsistent state!"
+            in
+            new_state, new_inputs
+          | Full -> (
+            match overflow_vertex with
+            | None -> failwith "node full but no overflow sucessor!"
+            | Some overflow_vertex ->
+              state, aggregate_money inputs overflow_vertex.id input)))
       g (state, inputs)
   in
   state

@@ -1,13 +1,26 @@
 type money
+
+val add_money : money -> money -> money
+val sub_money : money -> money -> money
+val money_from_units : int -> money
+val money_from_cents : int -> money
+val format_money : Format.formatter -> money -> unit
+
 type share
+
+val share_from_float : float -> share
+val share_from_percentage : int -> share
+val format_share : Format.formatter -> share -> unit
+val multiply_money : money -> share -> money
 
 module VertexId : sig
   type t
 
-  val fresh : unit -> t
+  val fresh : string -> t
   val compare : t -> t -> int
   val equal : t -> t -> bool
   val hash : t -> int
+  val format : Format.formatter -> t -> unit
 end
 
 module VertexMap : Map.S with type key = VertexId.t
@@ -20,7 +33,7 @@ type filling_condition =
   | CrossCollateralization of filling_condition * VertexSet.t
 
 module Vertex : sig
-  type t = { id : VertexId.t; filling_condition : filling_condition }
+  type t = { id : VertexId.t; filling_condition : filling_condition option }
 
   val compare : t -> t -> int
   val hash : t -> int
@@ -41,6 +54,8 @@ module WaterfallGraph :
 
 type filling_state = Remaining of money | Full
 type state = money VertexMap.t
+
+val format_state : Format.formatter -> state -> unit
 
 val interpret_filling_condition :
   state -> money -> filling_condition -> filling_state
