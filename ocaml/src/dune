@@ -1,4 +1,12 @@
+(library
+ (name runtime)
+ (modules runtime)
+ (libraries ocamlgraph zarith)
+ (package waterfall))
+
 (executable
  (public_name waterfall)
+ (modules main)
  (name main)
- (libraries ocamlgraph zarith))
+ (libraries runtime)
+ (package waterfall))
