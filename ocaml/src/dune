@@ -1,3 +1,4 @@
 (executable
  (public_name waterfall)
- (name main))
+ (name main)
+ (libraries incremental zarith))
