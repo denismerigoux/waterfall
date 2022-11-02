@@ -1,4 +1,4 @@
 (executable
  (public_name waterfall)
  (name main)
- (libraries incremental zarith))
+ (libraries ocamlgraph zarith))
