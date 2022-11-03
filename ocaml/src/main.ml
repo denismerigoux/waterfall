@@ -9,6 +9,7 @@ let () =
   let tv_first_basin_id = VertexId.fresh "tv_first_basin" in
   let producer_id = VertexId.fresh "producer" in
   let distributor_id = VertexId.fresh "distributor" in
+  let sofica_crosslat_id = VertexId.fresh "sofica_crosslat" in
   let sofica_id = VertexId.fresh "sofica" in
   let cinema_source_v =
     { Vertex.id = cinema_source_id; vertex_type = NodeWithoutOverflow }
@@ -29,7 +30,7 @@ let () =
         NodeWithOverflow
           (CrossCollateralization
              ( Cutoff (money_from_units 30_000),
-               VertexSet.singleton tv_first_basin_id ));
+               VertexSet.singleton sofica_crosslat_id ));
     }
   in
   let cinema_third_basin_v =
@@ -42,11 +43,14 @@ let () =
         NodeWithOverflow
           (CrossCollateralization
              ( Cutoff (money_from_units 30_000),
-               VertexSet.singleton cinema_second_basin_id ));
+               VertexSet.singleton sofica_crosslat_id ));
     }
   in
   let producer_v = { Vertex.id = producer_id; vertex_type = Sink } in
   let distributor_v = { Vertex.id = distributor_id; vertex_type = Sink } in
+  let sofica_crosslat_v =
+    { Vertex.id = sofica_crosslat_id; vertex_type = NodeWithoutOverflow }
+  in
   let sofica_v = { Vertex.id = sofica_id; vertex_type = Sink } in
   let vertices =
     [
@@ -57,6 +61,8 @@ let () =
       tv_first_basin_v;
       producer_v;
       distributor_v;
+      sofica_v;
+      sofica_crosslat_v;
     ]
   in
   let edges =
@@ -77,7 +83,7 @@ let () =
         producer_v;
       WaterfallGraph.E.create cinema_second_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 90)))
-        sofica_v;
+        sofica_crosslat_v;
       WaterfallGraph.E.create cinema_second_basin_v
         (EdgeLabel.MoneyFlow Overflow) cinema_third_basin_v;
       WaterfallGraph.E.create cinema_third_basin_v
@@ -97,13 +103,16 @@ let () =
         producer_v;
       WaterfallGraph.E.create tv_first_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 80)))
+        sofica_crosslat_v;
+      WaterfallGraph.E.create sofica_crosslat_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
         sofica_v;
       WaterfallGraph.E.create tv_first_basin_v (EdgeLabel.MoneyFlow Overflow)
         producer_v;
-      WaterfallGraph.E.create cinema_second_basin_v EdgeLabel.ControlFlow
-        tv_first_basin_v;
-      WaterfallGraph.E.create tv_first_basin_v EdgeLabel.ControlFlow
+      WaterfallGraph.E.create sofica_crosslat_v EdgeLabel.ControlFlow
         cinema_second_basin_v;
+      WaterfallGraph.E.create sofica_crosslat_v EdgeLabel.ControlFlow
+        tv_first_basin_v;
     ]
   in
   let g = WaterfallGraph.empty in

@@ -372,7 +372,7 @@ module Printer = Graph.Graphviz.Dot (struct
 
   let edge_attributes (e : E.t) : Graph.Graphviz.DotAttributes.edge list =
     match WaterfallGraph.E.label e with
-    | ControlFlow -> [`Style `Dotted; `Arrowhead `None]
+    | ControlFlow -> [`Style `Dotted; `Arrowhead `Normal]
     | MoneyFlow Overflow -> [`Style `Bold; `Label "overflow"]
     | MoneyFlow (Underflow s) -> [`Label (Format.asprintf "%a" format_share s)]
 end)
