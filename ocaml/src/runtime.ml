@@ -84,8 +84,13 @@ let rec format_filling_condition
          VertexId.format)
       (VertexSet.elements vs)
 
+type vertex_type =
+  | NodeWithoutOverflow
+  | NodeWithOverflow of filling_condition
+  | Sink
+
 module Vertex = struct
-  type t = { id : VertexId.t; filling_condition : filling_condition option }
+  type t = { id : VertexId.t; vertex_type : vertex_type }
 
   let compare x y = VertexId.compare x.id y.id
   let hash x = VertexId.hash x.id
@@ -166,10 +171,9 @@ let check_control_edges (g : WaterfallGraph.t) : unit =
           g v VertexSet.empty
       in
       let used_vertices =
-        used_vertices
-          (Option.value
-             ~default:(Cutoff (money_from_units 0))
-             v.filling_condition)
+        match v.vertex_type with
+        | NodeWithOverflow c -> used_vertices c
+        | _ -> VertexSet.empty
       in
       if not (VertexSet.equal control_vertices used_vertices) then
         failwith
@@ -195,9 +199,12 @@ let check_state (g : WaterfallGraph.t) (state : state) : unit =
     (fun v -> if not (VertexMap.mem v.id state) then failwith "Failed state")
     g
 
-let check_no_double_overflow_edge (g : WaterfallGraph.t) : unit =
+let check_number_and_type_edges (g : WaterfallGraph.t) : unit =
   WaterfallGraph.iter_vertex
     (fun v ->
+      let nb_outgoing =
+        WaterfallGraph.fold_succ_e (fun _e acc -> acc + 1) g v 0
+      in
       let nb_overflow =
         WaterfallGraph.fold_succ_e
           (fun e acc ->
@@ -206,12 +213,6 @@ let check_no_double_overflow_edge (g : WaterfallGraph.t) : unit =
             | _ -> acc)
           g v 0
       in
-      if nb_overflow > 1 then failwith "double overflow")
-    g
-
-let check_outgoing_underflow_shares_sum_to_one (g : WaterfallGraph.t) : unit =
-  WaterfallGraph.iter_vertex
-    (fun v ->
       let total_share =
         WaterfallGraph.fold_succ_e
           (fun e acc ->
@@ -220,17 +221,34 @@ let check_outgoing_underflow_shares_sum_to_one (g : WaterfallGraph.t) : unit =
             | _ -> acc)
           g v (share_from_percentage 0)
       in
-      if total_share <> share_from_percentage 100 then
-        failwith
-          (Format.asprintf "sum of shares not 1 for %a" VertexId.format v.id))
+      match v.vertex_type with
+      | Sink ->
+        if nb_outgoing > 0 then
+          failwith
+            (Format.asprintf "sink can't have outgoing edges (%a)"
+               VertexId.format v.id)
+      | NodeWithOverflow _ ->
+        if total_share <> share_from_percentage 100 then
+          failwith
+            (Format.asprintf "sum of shares not 1 for %a" VertexId.format v.id);
+        if nb_overflow <> 1 then
+          failwith
+            (Format.asprintf "normally one underflow for %a" VertexId.format
+               v.id)
+      | NodeWithoutOverflow ->
+        if total_share <> share_from_percentage 100 then
+          failwith
+            (Format.asprintf "sum of shares not 1 for %a" VertexId.format v.id);
+        if nb_overflow > 0 then
+          failwith
+            (Format.asprintf "normally no underflow for %a" VertexId.format v.id))
     g
 
 let check_consistency (g : WaterfallGraph.t) (state : state) : unit =
   check_no_cycle g;
   check_control_edges g;
   check_state g state;
-  check_no_double_overflow_edge g;
-  check_outgoing_underflow_shares_sum_to_one g
+  check_number_and_type_edges g
 
 module WaterfallGraphTopological = Graph.Topological.Make (WaterfallGraph)
 
@@ -265,40 +283,45 @@ let add_money_to_graph
               | _ -> acc)
             g v None
         in
+        let underflow_vertices =
+          WaterfallGraph.fold_succ_e
+            (fun e acc ->
+              match WaterfallGraph.E.label e with
+              | MoneyFlow (Underflow share) ->
+                VertexMap.add (WaterfallGraph.E.dst e).id share acc
+              | _ -> acc)
+            g v VertexMap.empty
+        in
+        let update_underflow state inputs to_underflow =
+          let new_state = aggregate_money state v.id to_underflow in
+          let new_inputs =
+            VertexMap.fold
+              (fun underflow_v share new_inputs ->
+                aggregate_money new_inputs underflow_v
+                  (multiply_money to_underflow share))
+              underflow_vertices inputs
+          in
+          new_state, new_inputs
+        in
         let input : money = VertexMap.find v.id inputs in
-        match v.Vertex.filling_condition with
-        | None ->
-          (* we stash up money in there, it's a sink*)
-          aggregate_money state v.id input, inputs
-        | Some filling_condition -> (
+        match v.Vertex.vertex_type with
+        | Sink -> aggregate_money state v.id input, inputs
+        | NodeWithoutOverflow -> update_underflow state inputs input
+        | NodeWithOverflow filling_condition -> (
           match
             interpret_filling_condition state
               (VertexMap.find v.id state)
               filling_condition
           with
           | Remaining remaining ->
-            let underflow_vertices =
-              WaterfallGraph.fold_succ_e
-                (fun e acc ->
-                  match WaterfallGraph.E.label e with
-                  | MoneyFlow (Underflow share) ->
-                    VertexMap.add (WaterfallGraph.E.dst e).id share acc
-                  | _ -> acc)
-                g v VertexMap.empty
-            in
             let to_underflow = if input > remaining then remaining else input in
             let to_overflow =
               if input > remaining then Some (sub_money input remaining)
               else None
             in
 
-            let new_state = aggregate_money state v.id to_underflow in
-            let new_inputs =
-              VertexMap.fold
-                (fun underflow_v share new_inputs ->
-                  aggregate_money new_inputs underflow_v
-                    (multiply_money to_underflow share))
-                underflow_vertices inputs
+            let new_state, new_inputs =
+              update_underflow state inputs to_underflow
             in
             let new_inputs =
               match overflow_vertex, to_overflow with
@@ -329,15 +352,16 @@ module Printer = Graph.Graphviz.Dot (struct
   let vertex_name (v : V.t) : string = Format.asprintf "%a" VertexId.format v.id
 
   let vertex_attributes (v : V.t) : Graph.Graphviz.DotAttributes.vertex list =
-    [
-      `Label
-        (Format.asprintf "%a\n" VertexId.format v.id
-        ^
-        match v.filling_condition with
-        | None -> "no overflow"
-        | Some c -> Format.asprintf "overflow at %a" format_filling_condition c
-        );
-    ]
+    match v.vertex_type with
+    | Sink -> [`Shape `Doubleoctagon]
+    | NodeWithoutOverflow -> []
+    | NodeWithOverflow c ->
+      [
+        `Shape `Box3d;
+        `Label
+          (Format.asprintf "%a\noverflow at %a" VertexId.format v.id
+             format_filling_condition c);
+      ]
 
   let get_subgraph (_g : V.t) : Graph.Graphviz.DotAttributes.subgraph option =
     None

@@ -32,8 +32,13 @@ type filling_condition =
   | Cutoff of money
   | CrossCollateralization of filling_condition * VertexSet.t
 
+type vertex_type =
+  | NodeWithoutOverflow
+  | NodeWithOverflow of filling_condition
+  | Sink
+
 module Vertex : sig
-  type t = { id : VertexId.t; filling_condition : filling_condition option }
+  type t = { id : VertexId.t; vertex_type : vertex_type }
 
   val compare : t -> t -> int
   val hash : t -> int

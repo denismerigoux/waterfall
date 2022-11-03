@@ -11,56 +11,49 @@ let () =
   let distributor_id = VertexId.fresh "distributor" in
   let sofica_id = VertexId.fresh "sofica" in
   let cinema_source_v =
-    {
-      Vertex.id = cinema_source_id;
-      filling_condition = Some (Cutoff (money_from_units 0));
-    }
+    { Vertex.id = cinema_source_id; vertex_type = NodeWithoutOverflow }
   in
   let tv_source_v =
-    {
-      Vertex.id = tv_source_id;
-      filling_condition = Some (Cutoff (money_from_units 0));
-    }
+    { Vertex.id = tv_source_id; vertex_type = NodeWithoutOverflow }
   in
   let cinema_first_basin_v =
     {
       Vertex.id = cinema_first_basin_id;
-      filling_condition = Some (Cutoff (money_from_units 15_000));
+      vertex_type = NodeWithOverflow (Cutoff (money_from_units 15_000));
     }
   in
   let cinema_second_basin_v =
     {
       Vertex.id = cinema_second_basin_id;
-      filling_condition =
-        Some
+      vertex_type =
+        NodeWithOverflow
           (CrossCollateralization
              ( Cutoff (money_from_units 30_000),
                VertexSet.singleton tv_first_basin_id ));
     }
   in
   let cinema_third_basin_v =
-    { Vertex.id = cinema_third_basin_id; filling_condition = None }
+    { Vertex.id = cinema_third_basin_id; vertex_type = NodeWithoutOverflow }
   in
   let tv_first_basin_v =
     {
       Vertex.id = tv_first_basin_id;
-      filling_condition =
-        Some
+      vertex_type =
+        NodeWithOverflow
           (CrossCollateralization
              ( Cutoff (money_from_units 30_000),
                VertexSet.singleton cinema_second_basin_id ));
     }
   in
-  let producer_v = { Vertex.id = producer_id; filling_condition = None } in
-  let distributor_v =
-    { Vertex.id = distributor_id; filling_condition = None }
-  in
-  let sofica_v = { Vertex.id = sofica_id; filling_condition = None } in
+  let producer_v = { Vertex.id = producer_id; vertex_type = Sink } in
+  let distributor_v = { Vertex.id = distributor_id; vertex_type = Sink } in
+  let sofica_v = { Vertex.id = sofica_id; vertex_type = Sink } in
   let vertices =
     [
       cinema_source_v;
       cinema_first_basin_v;
       cinema_second_basin_v;
+      cinema_third_basin_v;
       tv_first_basin_v;
       producer_v;
       distributor_v;
@@ -68,7 +61,8 @@ let () =
   in
   let edges =
     [
-      WaterfallGraph.E.create cinema_source_v (EdgeLabel.MoneyFlow Overflow)
+      WaterfallGraph.E.create cinema_source_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
         cinema_first_basin_v;
       WaterfallGraph.E.create cinema_first_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 30)))
@@ -95,7 +89,8 @@ let () =
       WaterfallGraph.E.create cinema_third_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 50)))
         producer_v;
-      WaterfallGraph.E.create tv_source_v (EdgeLabel.MoneyFlow Overflow)
+      WaterfallGraph.E.create tv_source_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
         tv_first_basin_v;
       WaterfallGraph.E.create tv_first_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 20)))
