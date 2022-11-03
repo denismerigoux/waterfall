@@ -67,3 +67,8 @@ val aggregate_money :
 
 val add_money_to_graph :
   WaterfallGraph.t -> state -> VertexId.t -> money -> state
+
+module Printer : sig
+  val fprint_graph : Format.formatter -> WaterfallGraph.t -> unit
+  val output_graph : out_channel -> WaterfallGraph.t -> unit
+end

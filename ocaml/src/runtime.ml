@@ -13,6 +13,8 @@ let format_money (fmt : Format.formatter) (m : money) =
 type share = Q.t
 (** Fraction between 0 and 1*)
 
+let sum_share (s1 : share) (s2 : share) : share = Q.(s1 + s2)
+
 let format_share (fmt : Format.formatter) (s : share) =
   Format.fprintf fmt "%s" (Q.to_string s)
 
@@ -52,7 +54,7 @@ end = struct
   let hash x = snd x
   let equal x y = compare (snd x) (snd y) = 0
   let compare x y = compare (snd x) (snd y)
-  let format fmt x = Format.fprintf fmt "%s_%d" (fst x) (snd x)
+  let format fmt x = Format.fprintf fmt "%s" (fst x)
 end
 
 module VertexMap = Map.Make (VertexId)
@@ -63,6 +65,24 @@ type filling_condition =
   | Disjunction of filling_condition * filling_condition
   | Cutoff of money
   | CrossCollateralization of filling_condition * VertexSet.t
+
+let rec format_filling_condition
+    (fmt : Format.formatter)
+    (c : filling_condition) : unit =
+  match c with
+  | Cutoff m -> format_money fmt m
+  | Conjunction (c1, c2) ->
+    Format.fprintf fmt "(%a) and (%a)" format_filling_condition c1
+      format_filling_condition c2
+  | Disjunction (c1, c2) ->
+    Format.fprintf fmt "(%a) or (%a)" format_filling_condition c1
+      format_filling_condition c2
+  | CrossCollateralization (c, vs) ->
+    Format.fprintf fmt "(%a) taking in %a" format_filling_condition c
+      (Format.pp_print_list
+         ~pp_sep:(fun fmt () -> Format.fprintf fmt ",")
+         VertexId.format)
+      (VertexSet.elements vs)
 
 module Vertex = struct
   type t = { id : VertexId.t; filling_condition : filling_condition option }
@@ -175,10 +195,35 @@ let check_state (g : WaterfallGraph.t) (state : state) : unit =
     (fun v -> if not (VertexMap.mem v.id state) then failwith "Failed state")
     g
 
-let check_no_double_overflow_edge (_g : WaterfallGraph.t) : unit = () (*TODO*)
+let check_no_double_overflow_edge (g : WaterfallGraph.t) : unit =
+  WaterfallGraph.iter_vertex
+    (fun v ->
+      let nb_overflow =
+        WaterfallGraph.fold_succ_e
+          (fun e acc ->
+            match WaterfallGraph.E.label e with
+            | MoneyFlow Overflow -> acc + 1
+            | _ -> acc)
+          g v 0
+      in
+      if nb_overflow > 1 then failwith "double overflow")
+    g
 
-let check_outgoing_underflow_shares_sum_to_one (_g : WaterfallGraph.t) : unit =
-  () (*TODO*)
+let check_outgoing_underflow_shares_sum_to_one (g : WaterfallGraph.t) : unit =
+  WaterfallGraph.iter_vertex
+    (fun v ->
+      let total_share =
+        WaterfallGraph.fold_succ_e
+          (fun e acc ->
+            match WaterfallGraph.E.label e with
+            | MoneyFlow (Underflow s) -> sum_share s acc
+            | _ -> acc)
+          g v (share_from_percentage 0)
+      in
+      if total_share <> share_from_percentage 100 then
+        failwith
+          (Format.asprintf "sum of shares not 1 for %a" VertexId.format v.id))
+    g
 
 let check_consistency (g : WaterfallGraph.t) (state : state) : unit =
   check_no_cycle g;
@@ -271,3 +316,39 @@ let add_money_to_graph
       g (state, inputs)
   in
   state
+
+module Printer = Graph.Graphviz.Dot (struct
+  include WaterfallGraph
+
+  let graph_attributes (_g : t) : Graph.Graphviz.DotAttributes.graph list = []
+
+  let default_vertex_attributes (_g : t) :
+      Graph.Graphviz.DotAttributes.vertex list =
+    [`Shape `Box]
+
+  let vertex_name (v : V.t) : string = Format.asprintf "%a" VertexId.format v.id
+
+  let vertex_attributes (v : V.t) : Graph.Graphviz.DotAttributes.vertex list =
+    [
+      `Label
+        (Format.asprintf "%a\n" VertexId.format v.id
+        ^
+        match v.filling_condition with
+        | None -> "no overflow"
+        | Some c -> Format.asprintf "overflow at %a" format_filling_condition c
+        );
+    ]
+
+  let get_subgraph (_g : V.t) : Graph.Graphviz.DotAttributes.subgraph option =
+    None
+
+  let default_edge_attributes (_g : t) : Graph.Graphviz.DotAttributes.edge list
+      =
+    []
+
+  let edge_attributes (e : E.t) : Graph.Graphviz.DotAttributes.edge list =
+    match WaterfallGraph.E.label e with
+    | ControlFlow -> [`Style `Dotted; `Arrowhead `None]
+    | MoneyFlow Overflow -> [`Style `Bold; `Label "overflow"]
+    | MoneyFlow (Underflow s) -> [`Label (Format.asprintf "%a" format_share s)]
+end)

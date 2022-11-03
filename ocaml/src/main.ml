@@ -5,6 +5,7 @@ let () =
   let tv_source_id = VertexId.fresh "tv_source" in
   let cinema_first_basin_id = VertexId.fresh "cine_first_basin" in
   let cinema_second_basin_id = VertexId.fresh "cine_second_basin" in
+  let cinema_third_basin_id = VertexId.fresh "cine_third_basin" in
   let tv_first_basin_id = VertexId.fresh "tv_first_basin" in
   let producer_id = VertexId.fresh "producer" in
   let distributor_id = VertexId.fresh "distributor" in
@@ -36,6 +37,9 @@ let () =
              ( Cutoff (money_from_units 30_000),
                VertexSet.singleton tv_first_basin_id ));
     }
+  in
+  let cinema_third_basin_v =
+    { Vertex.id = cinema_third_basin_id; filling_condition = None }
   in
   let tv_first_basin_v =
     {
@@ -81,14 +85,23 @@ let () =
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 90)))
         sofica_v;
       WaterfallGraph.E.create cinema_second_basin_v
-        (EdgeLabel.MoneyFlow Overflow) producer_v;
+        (EdgeLabel.MoneyFlow Overflow) cinema_third_basin_v;
+      WaterfallGraph.E.create cinema_third_basin_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 15)))
+        distributor_v;
+      WaterfallGraph.E.create cinema_third_basin_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 35)))
+        sofica_v;
+      WaterfallGraph.E.create cinema_third_basin_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 50)))
+        producer_v;
       WaterfallGraph.E.create tv_source_v (EdgeLabel.MoneyFlow Overflow)
         tv_first_basin_v;
       WaterfallGraph.E.create tv_first_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 20)))
         producer_v;
       WaterfallGraph.E.create tv_first_basin_v
-        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 90)))
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 80)))
         sofica_v;
       WaterfallGraph.E.create tv_first_basin_v (EdgeLabel.MoneyFlow Overflow)
         producer_v;
@@ -128,4 +141,8 @@ let () =
   let state =
     add_money_to_graph g state cinema_source_id (money_from_units 20_000)
   in
-  display state
+  display state;
+  let oc = open_out "graph.dot" in
+  let fmt = Format.formatter_of_out_channel oc in
+  Printer.fprint_graph fmt g;
+  close_out oc
