@@ -11,16 +11,39 @@ let () =
   let distributor_id = VertexId.fresh "distributor" in
   let sofica_crosslat_id = VertexId.fresh "sofica_crosslat" in
   let sofica_id = VertexId.fresh "sofica" in
+  let waterfall_cine =
+    {
+      Graph.Graphviz.DotAttributes.sg_name = "waterfall_cine";
+      Graph.Graphviz.DotAttributes.sg_attributes = [`Peripheries 0];
+      Graph.Graphviz.DotAttributes.sg_parent = None;
+    }
+  in
+  let waterfall_tv =
+    {
+      Graph.Graphviz.DotAttributes.sg_name = "waterfall_tv";
+      Graph.Graphviz.DotAttributes.sg_attributes = [`Peripheries 0];
+      Graph.Graphviz.DotAttributes.sg_parent = None;
+    }
+  in
   let cinema_source_v =
-    { Vertex.id = cinema_source_id; vertex_type = NodeWithoutOverflow }
+    {
+      Vertex.id = cinema_source_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_cine;
+    }
   in
   let tv_source_v =
-    { Vertex.id = tv_source_id; vertex_type = NodeWithoutOverflow }
+    {
+      Vertex.id = tv_source_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_tv;
+    }
   in
   let cinema_first_basin_v =
     {
       Vertex.id = cinema_first_basin_id;
       vertex_type = NodeWithOverflow (Cutoff (money_from_units 15_000));
+      subgraph = Some waterfall_cine;
     }
   in
   let cinema_second_basin_v =
@@ -31,10 +54,15 @@ let () =
           (CrossCollateralization
              ( Cutoff (money_from_units 30_000),
                VertexSet.singleton sofica_crosslat_id ));
+      subgraph = Some waterfall_cine;
     }
   in
   let cinema_third_basin_v =
-    { Vertex.id = cinema_third_basin_id; vertex_type = NodeWithoutOverflow }
+    {
+      Vertex.id = cinema_third_basin_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_cine;
+    }
   in
   let tv_first_basin_v =
     {
@@ -44,14 +72,25 @@ let () =
           (CrossCollateralization
              ( Cutoff (money_from_units 30_000),
                VertexSet.singleton sofica_crosslat_id ));
+      subgraph = Some waterfall_tv;
     }
   in
-  let producer_v = { Vertex.id = producer_id; vertex_type = Sink } in
-  let distributor_v = { Vertex.id = distributor_id; vertex_type = Sink } in
-  let sofica_crosslat_v =
-    { Vertex.id = sofica_crosslat_id; vertex_type = NodeWithoutOverflow }
+  let producer_v =
+    { Vertex.id = producer_id; vertex_type = Sink; subgraph = None }
   in
-  let sofica_v = { Vertex.id = sofica_id; vertex_type = Sink } in
+  let distributor_v =
+    { Vertex.id = distributor_id; vertex_type = Sink; subgraph = None }
+  in
+  let sofica_crosslat_v =
+    {
+      Vertex.id = sofica_crosslat_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = None;
+    }
+  in
+  let sofica_v =
+    { Vertex.id = sofica_id; vertex_type = Sink; subgraph = None }
+  in
   let vertices =
     [
       cinema_source_v;

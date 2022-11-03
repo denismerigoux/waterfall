@@ -16,7 +16,7 @@ type share = Q.t
 let sum_share (s1 : share) (s2 : share) : share = Q.(s1 + s2)
 
 let format_share (fmt : Format.formatter) (s : share) =
-  Format.fprintf fmt "%s" (Q.to_string s)
+  Format.fprintf fmt "%.0f%%" (Q.to_float Q.(s * of_int 100))
 
 let share_from_float f = Q.of_float f
 let share_from_percentage p = Q.(of_int p / of_int 100)
@@ -90,7 +90,11 @@ type vertex_type =
   | Sink
 
 module Vertex = struct
-  type t = { id : VertexId.t; vertex_type : vertex_type }
+  type t = {
+    id : VertexId.t;
+    vertex_type : vertex_type;
+    subgraph : Graph.Graphviz.DotAttributes.subgraph option;
+  }
 
   let compare x y = VertexId.compare x.id y.id
   let hash x = VertexId.hash x.id
@@ -363,8 +367,8 @@ module Printer = Graph.Graphviz.Dot (struct
              format_filling_condition c);
       ]
 
-  let get_subgraph (_g : V.t) : Graph.Graphviz.DotAttributes.subgraph option =
-    None
+  let get_subgraph (v : V.t) : Graph.Graphviz.DotAttributes.subgraph option =
+    v.subgraph
 
   let default_edge_attributes (_g : t) : Graph.Graphviz.DotAttributes.edge list
       =
@@ -372,7 +376,10 @@ module Printer = Graph.Graphviz.Dot (struct
 
   let edge_attributes (e : E.t) : Graph.Graphviz.DotAttributes.edge list =
     match WaterfallGraph.E.label e with
-    | ControlFlow -> [`Style `Dotted; `Arrowhead `Normal]
-    | MoneyFlow Overflow -> [`Style `Bold; `Label "overflow"]
-    | MoneyFlow (Underflow s) -> [`Label (Format.asprintf "%a" format_share s)]
+    | ControlFlow -> [`Style `Dotted; `Arrowhead `Normal; `Constraint false]
+    | MoneyFlow Overflow -> [`Label "■100\\%"]
+    | MoneyFlow (Underflow s) -> (
+      match (WaterfallGraph.E.src e).vertex_type with
+      | NodeWithOverflow _ -> [`Label (Format.asprintf "⬓%a" format_share s)]
+      | _ -> [`Label (Format.asprintf "%a" format_share s)])
 end)

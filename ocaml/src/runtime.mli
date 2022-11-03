@@ -38,7 +38,11 @@ type vertex_type =
   | Sink
 
 module Vertex : sig
-  type t = { id : VertexId.t; vertex_type : vertex_type }
+  type t = {
+    id : VertexId.t;
+    vertex_type : vertex_type;
+    subgraph : Graph.Graphviz.DotAttributes.subgraph option;
+  }
 
   val compare : t -> t -> int
   val hash : t -> int
