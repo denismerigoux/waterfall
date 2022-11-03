@@ -61,7 +61,6 @@ val interpret_filling_condition :
   state -> money -> filling_condition -> filling_state
 
 val used_vertices : filling_condition -> VertexSet.t
-val check_control_edges : WaterfallGraph.t -> bool
 
 val aggregate_money :
   money VertexMap.t -> VertexId.t -> money -> money VertexMap.t

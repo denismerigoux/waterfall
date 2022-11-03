@@ -125,29 +125,6 @@ let rec used_vertices (c : filling_condition) : VertexSet.t =
     VertexSet.union (used_vertices c1) (used_vertices c2)
   | CrossCollateralization (c, vs) -> VertexSet.union (used_vertices c) vs
 
-let check_control_edges (g : WaterfallGraph.t) : bool =
-  not
-    (WaterfallGraph.fold_vertex
-       (fun v stop ->
-         stop
-         ||
-         let control_vertices =
-           WaterfallGraph.fold_pred_e
-             (fun e control_vertices ->
-               match WaterfallGraph.E.label e with
-               | ControlFlow ->
-                 VertexSet.add (WaterfallGraph.E.src e).id control_vertices
-               | MoneyFlow _ -> control_vertices)
-             g v VertexSet.empty
-         in
-         not
-           (VertexSet.equal control_vertices
-              (used_vertices
-                 (Option.value
-                    ~default:(Cutoff (money_from_units 0))
-                    v.filling_condition))))
-       g false)
-
 module MoneyGraphSCC = Graph.Components.Make (WaterfallGraph)
 
 let format_state fmt state =
@@ -156,7 +133,31 @@ let format_state fmt state =
       Format.fprintf fmt "%a -> %a\n" VertexId.format v format_money m)
     state
 
-let check_no_cycle (g : WaterfallGraph.t) : bool =
+let check_control_edges (g : WaterfallGraph.t) : unit =
+  WaterfallGraph.iter_vertex
+    (fun v ->
+      let control_vertices =
+        WaterfallGraph.fold_pred_e
+          (fun e control_vertices ->
+            match WaterfallGraph.E.label e with
+            | ControlFlow ->
+              VertexSet.add (WaterfallGraph.E.src e).id control_vertices
+            | MoneyFlow _ -> control_vertices)
+          g v VertexSet.empty
+      in
+      let used_vertices =
+        used_vertices
+          (Option.value
+             ~default:(Cutoff (money_from_units 0))
+             v.filling_condition)
+      in
+      if not (VertexSet.equal control_vertices used_vertices) then
+        failwith
+          (Format.asprintf "Failed control edges for node %a" VertexId.format
+             v.id))
+    g
+
+let check_no_cycle (g : WaterfallGraph.t) : unit =
   (* we only check for cycles in the money flow, control edges can cycle *)
   let g =
     WaterfallGraph.fold_edges_e
@@ -167,28 +168,24 @@ let check_no_cycle (g : WaterfallGraph.t) : bool =
       g g
   in
   let nb_components, _ = MoneyGraphSCC.scc g in
-  nb_components = WaterfallGraph.nb_vertex g
+  if nb_components <> WaterfallGraph.nb_vertex g then failwith "Failed cycle"
 
-let check_state (g : WaterfallGraph.t) (state : state) : bool =
-  not
-    (WaterfallGraph.fold_vertex
-       (fun v stop -> stop || not (VertexMap.mem v.id state))
-       g false)
+let check_state (g : WaterfallGraph.t) (state : state) : unit =
+  WaterfallGraph.iter_vertex
+    (fun v -> if not (VertexMap.mem v.id state) then failwith "Failed state")
+    g
 
-let check_no_double_overflow_edge (_g : WaterfallGraph.t) : bool = true (*TODO*)
+let check_no_double_overflow_edge (_g : WaterfallGraph.t) : unit = () (*TODO*)
 
-let check_outgoing_underflow_shares_sum_to_one (_g : WaterfallGraph.t) : bool =
-  true (*TODO*)
+let check_outgoing_underflow_shares_sum_to_one (_g : WaterfallGraph.t) : unit =
+  () (*TODO*)
 
 let check_consistency (g : WaterfallGraph.t) (state : state) : unit =
-  if
-    not
-      (check_no_cycle g
-      && check_control_edges g
-      && check_state g state
-      && check_no_double_overflow_edge g
-      && check_outgoing_underflow_shares_sum_to_one g)
-  then failwith "Inconsistency"
+  check_no_cycle g;
+  check_control_edges g;
+  check_state g state;
+  check_no_double_overflow_edge g;
+  check_outgoing_underflow_shares_sum_to_one g
 
 module WaterfallGraphTopological = Graph.Topological.Make (WaterfallGraph)
 
