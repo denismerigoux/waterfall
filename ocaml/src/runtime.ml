@@ -114,6 +114,14 @@ module WaterfallGraph =
   Graph.Persistent.Digraph.ConcreteLabeled (Vertex) (EdgeLabel)
 
 type filling_state = Remaining of money | Full
+
+let format_filling_state (fmt : Format.formatter) (s : filling_state) : unit =
+  match s with
+  | Remaining remaining ->
+    Format.fprintf fmt "<FONT COLOR='#cf7317'>(%a remaining)</FONT>"
+      format_money remaining
+  | Full -> Format.fprintf fmt "<FONT COLOR=\'#700009\'>(full)</FONT>"
+
 type state = money VertexMap.t
 
 let rec interpret_filling_condition
@@ -270,6 +278,7 @@ module PrintVertex = struct
     id : VertexId.t;
     vertex_type : vertex_type;
     subgraph : Graph.Graphviz.DotAttributes.subgraph option;
+    filling_state : filling_state option;
     money_flowed : money;
     delta : money;
   }
@@ -292,7 +301,8 @@ module PrintWaterfallGraph =
 let get_delta_node
     (v : Vertex.t)
     (state : state)
-    (previous_state : state option) : PrintVertex.t =
+    (previous_state : state option)
+    (filling_state : filling_state VertexMap.t) : PrintVertex.t =
   {
     PrintVertex.id = v.id;
     vertex_type = v.vertex_type;
@@ -305,6 +315,7 @@ let get_delta_node
         sub_money
           (VertexMap.find v.id state)
           (VertexMap.find v.id previous_state));
+    filling_state = VertexMap.find_opt v.id filling_state;
   }
 
 let add_money_to_graph
@@ -318,11 +329,14 @@ let add_money_to_graph
       (fun v _ -> if VertexId.equal v start then m else zero_money)
       state
   in
-  let new_state, _, edges_flow =
+  let new_state, _, edges_flow, filling_state =
     WaterfallGraphTopological.fold
       (fun (v : Vertex.t)
-           ((state, inputs, edges_flow) :
-             state * state * (VertexId.t * PrintEdgeLabel.t * VertexId.t) list) ->
+           ((state, inputs, edges_flow, filling_state) :
+             state
+             * state
+             * (VertexId.t * PrintEdgeLabel.t * VertexId.t) list
+             * filling_state VertexMap.t) ->
         let overflow_vertex =
           WaterfallGraph.fold_succ_e
             (fun e acc ->
@@ -367,11 +381,13 @@ let add_money_to_graph
           new_state, new_inputs, new_edges_flow
         in
         let input : money = VertexMap.find v.id inputs in
-        let new_state, new_inputs, new_edges_flow =
+        let new_state, new_inputs, new_edges_flow, new_filling_state =
           match v.Vertex.vertex_type with
-          | Sink -> aggregate_money state v.id input, inputs, edges_flow
+          | Sink ->
+            aggregate_money state v.id input, inputs, edges_flow, filling_state
           | NodeWithoutOverflow ->
-            update_underflow state inputs input edges_flow
+            let x, y, z = update_underflow state inputs input edges_flow in
+            x, y, z, filling_state
           | NodeWithOverflow filling_condition -> (
             match
               interpret_filling_condition state
@@ -410,7 +426,13 @@ let add_money_to_graph
                 | None, None -> new_inputs, new_edges_flow
                 | None, Some _ -> failwith "inconsistent state!"
               in
-              new_state, new_inputs, new_edges_flow
+              ( new_state,
+                new_inputs,
+                new_edges_flow,
+                VertexMap.add v.id
+                  (if Option.is_some to_overflow then Full
+                  else Remaining (sub_money remaining to_underflow))
+                  filling_state )
             | Full -> (
               let new_state, new_inputs, new_edges_flow =
                 update_underflow state inputs (money_from_units 0) edges_flow
@@ -428,16 +450,18 @@ let add_money_to_graph
                         else Some input);
                     },
                     overflow_vertex.id )
-                  :: new_edges_flow )))
+                  :: new_edges_flow,
+                  VertexMap.add v.id Full filling_state )))
         in
-        new_state, new_inputs, new_edges_flow)
-      g (state, inputs, [])
+        new_state, new_inputs, new_edges_flow, new_filling_state)
+      g
+      (state, inputs, [], VertexMap.empty)
   in
   let delta_graph =
     WaterfallGraph.fold_vertex
       (fun v delta_graph ->
         PrintWaterfallGraph.add_vertex delta_graph
-          (get_delta_node v new_state (Some state)))
+          (get_delta_node v new_state (Some state) filling_state))
       g PrintWaterfallGraph.empty
   in
   let delta_graph_nodes =
@@ -465,15 +489,15 @@ let to_printable_graph
     WaterfallGraph.fold_vertex
       (fun v g' ->
         PrintWaterfallGraph.add_vertex g'
-          (get_delta_node v state previous_state))
+          (get_delta_node v state previous_state VertexMap.empty))
       g g'
   in
   WaterfallGraph.fold_edges_e
     (fun (src, l, dst) g' ->
       PrintWaterfallGraph.add_edge_e g'
-        ( get_delta_node src state previous_state,
+        ( get_delta_node src state previous_state VertexMap.empty,
           { label = l; flow = None },
-          get_delta_node dst state previous_state ))
+          get_delta_node dst state previous_state VertexMap.empty ))
     g g'
 
 module Printer = Graph.Graphviz.Dot (struct
@@ -492,34 +516,48 @@ module Printer = Graph.Graphviz.Dot (struct
     | Sink ->
       [
         `Shape `Doubleoctagon;
-        `Label
-          (Format.asprintf "%a\n⬓: %a%a" VertexId.format v.id format_money
-             v.money_flowed
+        `HtmlLabel
+          (Format.asprintf "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a"
+             VertexId.format v.id format_money v.money_flowed
              (fun fmt delta ->
                if delta = money_from_units 0 then Format.fprintf fmt ""
-               else Format.fprintf fmt "\nΔ: +%a" format_money delta)
+               else
+                 Format.fprintf fmt "<BR/><FONT COLOR=\'#00691c\'>+%a</FONT>"
+                   format_money delta)
              v.delta);
       ]
     | NodeWithoutOverflow ->
       [
-        `Label
-          (Format.asprintf "%a\n⬓: %a%a" VertexId.format v.id format_money
-             v.money_flowed
+        `HtmlLabel
+          (Format.asprintf "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a"
+             VertexId.format v.id format_money v.money_flowed
              (fun fmt delta ->
                if delta = money_from_units 0 then Format.fprintf fmt ""
-               else Format.fprintf fmt "\nΔ: +%a" format_money delta)
+               else
+                 Format.fprintf fmt "<BR/><FONT COLOR=\'#00691c\'>+%a</FONT>"
+                   format_money delta)
              v.delta);
       ]
     | NodeWithOverflow c ->
       [
         `Shape `Box3d;
-        `Label
-          (Format.asprintf "%a\n⬓: %a%a\n■: %a" VertexId.format v.id
-             format_money v.money_flowed
+        `HtmlLabel
+          (Format.asprintf
+             "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a<BR/><FONT \
+              COLOR='#008aa6'>■: %a</FONT>%a"
+             VertexId.format v.id format_money v.money_flowed
+             (fun fmt filling_state ->
+               match filling_state with
+               | None -> Format.fprintf fmt ""
+               | Some filling_state ->
+                 Format.fprintf fmt " %a" format_filling_state filling_state)
+             v.filling_state format_filling_condition c
              (fun fmt delta ->
                if delta = money_from_units 0 then Format.fprintf fmt ""
-               else Format.fprintf fmt "\nΔ: +%a" format_money delta)
-             v.delta format_filling_condition c);
+               else
+                 Format.fprintf fmt "<BR/><FONT COLOR=\'#00691c\'>+%a</FONT>"
+                   format_money delta)
+             v.delta);
       ]
 
   let get_subgraph (v : V.t) : Graph.Graphviz.DotAttributes.subgraph option =
@@ -533,14 +571,26 @@ module Printer = Graph.Graphviz.Dot (struct
     let flow_str =
       match (PrintWaterfallGraph.E.label e).flow with
       | None -> ""
-      | Some flow -> Format.asprintf "\nΔ→%a" format_money flow
+      | Some flow ->
+        Format.asprintf "<BR/><FONT COLOR=\'#00691c\'>%a</FONT>" format_money
+          flow
     in
     match (PrintWaterfallGraph.E.label e).label with
     | ControlFlow -> [`Style `Dotted; `Arrowhead `Normal; `Constraint false]
-    | MoneyFlow Overflow -> [`Label ("■100\\%" ^ flow_str)]
+    | MoneyFlow Overflow ->
+      [`HtmlLabel ("<FONT COLOR='#008aa6'>■100%</FONT>" ^ flow_str)]
     | MoneyFlow (Underflow s) -> (
       match (PrintWaterfallGraph.E.src e).vertex_type with
       | NodeWithOverflow _ ->
-        [`Label (Format.asprintf "⬓%a%s" format_share s flow_str)]
-      | _ -> [`Label (Format.asprintf "%a%s" format_share s flow_str)])
+        [
+          `HtmlLabel
+            (Format.asprintf "<FONT COLOR='#516ae8'>⬓%a</FONT>%s" format_share s
+               flow_str);
+        ]
+      | _ ->
+        [
+          `HtmlLabel
+            (Format.asprintf "<FONT COLOR='#516ae8'>%a</FONT>%s" format_share s
+               flow_str);
+        ])
 end)
