@@ -9,7 +9,6 @@ let () =
   let tv_first_basin_id = VertexId.fresh "tv_first_basin" in
   let producer_id = VertexId.fresh "producer" in
   let distributor_id = VertexId.fresh "distributor" in
-  let sofica_crosslat_id = VertexId.fresh "sofica_crosslat" in
   let sofica_id = VertexId.fresh "sofica" in
   let waterfall_cine =
     {
@@ -53,7 +52,7 @@ let () =
         NodeWithOverflow
           (CrossCollateralization
              ( Cutoff (money_from_units 30_000),
-               VertexSet.singleton sofica_crosslat_id ));
+               VertexSet.singleton tv_first_basin_id ));
       subgraph = Some waterfall_cine;
     }
   in
@@ -71,7 +70,7 @@ let () =
         NodeWithOverflow
           (CrossCollateralization
              ( Cutoff (money_from_units 30_000),
-               VertexSet.singleton sofica_crosslat_id ));
+               VertexSet.singleton cinema_second_basin_id ));
       subgraph = Some waterfall_tv;
     }
   in
@@ -80,13 +79,6 @@ let () =
   in
   let distributor_v =
     { Vertex.id = distributor_id; vertex_type = Sink; subgraph = None }
-  in
-  let sofica_crosslat_v =
-    {
-      Vertex.id = sofica_crosslat_id;
-      vertex_type = NodeWithoutOverflow;
-      subgraph = None;
-    }
   in
   let sofica_v =
     { Vertex.id = sofica_id; vertex_type = Sink; subgraph = None }
@@ -101,7 +93,6 @@ let () =
       producer_v;
       distributor_v;
       sofica_v;
-      sofica_crosslat_v;
     ]
   in
   let edges =
@@ -122,7 +113,7 @@ let () =
         producer_v;
       WaterfallGraph.E.create cinema_second_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 90)))
-        sofica_crosslat_v;
+        sofica_v;
       WaterfallGraph.E.create cinema_second_basin_v
         (EdgeLabel.MoneyFlow Overflow) cinema_third_basin_v;
       WaterfallGraph.E.create cinema_third_basin_v
@@ -142,15 +133,12 @@ let () =
         producer_v;
       WaterfallGraph.E.create tv_first_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 80)))
-        sofica_crosslat_v;
-      WaterfallGraph.E.create sofica_crosslat_v
-        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
         sofica_v;
       WaterfallGraph.E.create tv_first_basin_v (EdgeLabel.MoneyFlow Overflow)
         producer_v;
-      WaterfallGraph.E.create sofica_crosslat_v EdgeLabel.ControlFlow
+      WaterfallGraph.E.create tv_first_basin_v EdgeLabel.ControlFlow
         cinema_second_basin_v;
-      WaterfallGraph.E.create sofica_crosslat_v EdgeLabel.ControlFlow
+      WaterfallGraph.E.create cinema_second_basin_v EdgeLabel.ControlFlow
         tv_first_basin_v;
     ]
   in
@@ -159,7 +147,7 @@ let () =
     List.fold_left (fun g v -> WaterfallGraph.add_vertex g v) g vertices
   in
   let g = List.fold_left (fun g e -> WaterfallGraph.add_edge_e g e) g edges in
-  let state =
+  let state1 =
     WaterfallGraph.fold_vertex
       (fun v state -> VertexMap.add v.id (money_from_units 0) state)
       g VertexMap.empty
@@ -170,22 +158,39 @@ let () =
     Format.printf "--> Current state:\n%a" format_state state
   in
 
-  let state =
-    add_money_to_graph g state cinema_source_id (money_from_units 10_000)
+  let state2 =
+    add_money_to_graph g state1 cinema_source_id (money_from_units 10_000)
   in
-  display state;
-  let state =
-    add_money_to_graph g state cinema_source_id (money_from_units 5_000)
-  in
-  display state;
-  let state =
-    add_money_to_graph g state tv_source_id (money_from_units 20_000)
-  in
-  let state =
-    add_money_to_graph g state cinema_source_id (money_from_units 20_000)
-  in
-  display state;
-  let oc = open_out "graph.dot" in
+  display state2;
+  let oc = open_out "graph1.dot" in
   let fmt = Format.formatter_of_out_channel oc in
-  Printer.fprint_graph fmt g;
+  let g' = to_printable_graph g state2 ~previous_state:state1 in
+  Printer.fprint_graph fmt g';
+  close_out oc;
+  let state3 =
+    add_money_to_graph g state2 cinema_source_id (money_from_units 10_000)
+  in
+  display state3;
+  let oc = open_out "graph2.dot" in
+  let fmt = Format.formatter_of_out_channel oc in
+  let g' = to_printable_graph g state3 ~previous_state:state2 in
+  Printer.fprint_graph fmt g';
+  close_out oc;
+  let state4 =
+    add_money_to_graph g state3 tv_source_id (money_from_units 20_000)
+  in
+  display state4;
+  let oc = open_out "graph3.dot" in
+  let fmt = Format.formatter_of_out_channel oc in
+  let g' = to_printable_graph g state4 ~previous_state:state3 in
+  Printer.fprint_graph fmt g';
+  close_out oc;
+  let state5 =
+    add_money_to_graph g state4 cinema_source_id (money_from_units 20_000)
+  in
+  display state5;
+  let oc = open_out "graph4.dot" in
+  let fmt = Format.formatter_of_out_channel oc in
+  let g' = to_printable_graph g state5 ~previous_state:state4 in
+  Printer.fprint_graph fmt g';
   close_out oc

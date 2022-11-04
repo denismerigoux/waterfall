@@ -344,8 +344,56 @@ let add_money_to_graph
   in
   state
 
+module PrintVertex = struct
+  type t = {
+    id : VertexId.t;
+    vertex_type : vertex_type;
+    subgraph : Graph.Graphviz.DotAttributes.subgraph option;
+    money_flowed : money;
+    delta : money;
+  }
+
+  let compare x y = VertexId.compare x.id y.id
+  let hash x = VertexId.hash x.id
+  let equal x y = VertexId.equal x.id y.id
+end
+
+module PrintWaterfallGraph =
+  Graph.Persistent.Digraph.ConcreteLabeled (PrintVertex) (EdgeLabel)
+
+let to_printable_graph
+    (g : WaterfallGraph.t)
+    ?(previous_state : state option)
+    (state : state) : PrintWaterfallGraph.t =
+  let g' = PrintWaterfallGraph.empty in
+  let transform_node (v : Vertex.t) : PrintVertex.t =
+    {
+      PrintVertex.id = v.id;
+      vertex_type = v.vertex_type;
+      subgraph = v.subgraph;
+      money_flowed = VertexMap.find v.id state;
+      delta =
+        (match previous_state with
+        | None -> money_from_units 0
+        | Some previous_state ->
+          sub_money
+            (VertexMap.find v.id state)
+            (VertexMap.find v.id previous_state));
+    }
+  in
+  let g' =
+    WaterfallGraph.fold_vertex
+      (fun v g' -> PrintWaterfallGraph.add_vertex g' (transform_node v))
+      g g'
+  in
+  WaterfallGraph.fold_edges_e
+    (fun (src, l, dst) g' ->
+      PrintWaterfallGraph.add_edge_e g'
+        (transform_node src, l, transform_node dst))
+    g g'
+
 module Printer = Graph.Graphviz.Dot (struct
-  include WaterfallGraph
+  include PrintWaterfallGraph
 
   let graph_attributes (_g : t) : Graph.Graphviz.DotAttributes.graph list = []
 
@@ -357,14 +405,37 @@ module Printer = Graph.Graphviz.Dot (struct
 
   let vertex_attributes (v : V.t) : Graph.Graphviz.DotAttributes.vertex list =
     match v.vertex_type with
-    | Sink -> [`Shape `Doubleoctagon]
-    | NodeWithoutOverflow -> []
+    | Sink ->
+      [
+        `Shape `Doubleoctagon;
+        `Label
+          (Format.asprintf "%a\n⬓: %a%a" VertexId.format v.id format_money
+             v.money_flowed
+             (fun fmt delta ->
+               if delta = money_from_units 0 then Format.fprintf fmt ""
+               else Format.fprintf fmt "\nΔ: +%a" format_money delta)
+             v.delta);
+      ]
+    | NodeWithoutOverflow ->
+      [
+        `Label
+          (Format.asprintf "%a\n⬓: %a%a" VertexId.format v.id format_money
+             v.money_flowed
+             (fun fmt delta ->
+               if delta = money_from_units 0 then Format.fprintf fmt ""
+               else Format.fprintf fmt "\nΔ: +%a" format_money delta)
+             v.delta);
+      ]
     | NodeWithOverflow c ->
       [
         `Shape `Box3d;
         `Label
-          (Format.asprintf "%a\noverflow at %a" VertexId.format v.id
-             format_filling_condition c);
+          (Format.asprintf "%a\n⬓: %a%a\n■: %a" VertexId.format v.id
+             format_money v.money_flowed
+             (fun fmt delta ->
+               if delta = money_from_units 0 then Format.fprintf fmt ""
+               else Format.fprintf fmt "\nΔ: +%a" format_money delta)
+             v.delta format_filling_condition c);
       ]
 
   let get_subgraph (v : V.t) : Graph.Graphviz.DotAttributes.subgraph option =
@@ -375,11 +446,11 @@ module Printer = Graph.Graphviz.Dot (struct
     []
 
   let edge_attributes (e : E.t) : Graph.Graphviz.DotAttributes.edge list =
-    match WaterfallGraph.E.label e with
+    match PrintWaterfallGraph.E.label e with
     | ControlFlow -> [`Style `Dotted; `Arrowhead `Normal; `Constraint false]
     | MoneyFlow Overflow -> [`Label "■100\\%"]
     | MoneyFlow (Underflow s) -> (
-      match (WaterfallGraph.E.src e).vertex_type with
+      match (PrintWaterfallGraph.E.src e).vertex_type with
       | NodeWithOverflow _ -> [`Label (Format.asprintf "⬓%a" format_share s)]
       | _ -> [`Label (Format.asprintf "%a" format_share s)])
 end)
