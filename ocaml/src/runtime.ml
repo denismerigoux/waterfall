@@ -331,14 +331,21 @@ let add_money_to_graph
               | _ -> acc)
             g v None
         in
-        let underflow_vertices =
+        let underflow_vertices, edges_flow =
           WaterfallGraph.fold_succ_e
-            (fun e acc ->
+            (fun e (acc, edges_flow) ->
               match WaterfallGraph.E.label e with
               | MoneyFlow (Underflow share) ->
-                VertexMap.add (WaterfallGraph.E.dst e).id share acc
-              | _ -> acc)
-            g v VertexMap.empty
+                VertexMap.add (WaterfallGraph.E.dst e).id share acc, edges_flow
+              | MoneyFlow Overflow -> acc, edges_flow
+              | ControlFlow ->
+                ( acc,
+                  ( v.id,
+                    { PrintEdgeLabel.label = ControlFlow; flow = None },
+                    (WaterfallGraph.E.dst e).id )
+                  :: edges_flow ))
+            g v
+            (VertexMap.empty, edges_flow)
         in
         let update_underflow state inputs to_underflow (edges_flow : 'a list) =
           let new_state = aggregate_money state v.id to_underflow in
@@ -405,18 +412,23 @@ let add_money_to_graph
               in
               new_state, new_inputs, new_edges_flow
             | Full -> (
+              let new_state, new_inputs, new_edges_flow =
+                update_underflow state inputs (money_from_units 0) edges_flow
+              in
               match overflow_vertex with
               | None -> failwith "node full but no overflow sucessor!"
               | Some overflow_vertex ->
-                ( state,
-                  aggregate_money inputs overflow_vertex.id input,
+                ( new_state,
+                  aggregate_money new_inputs overflow_vertex.id input,
                   ( v.id,
                     {
                       PrintEdgeLabel.label = MoneyFlow Overflow;
-                      flow = Some input;
+                      flow =
+                        (if input = money_from_units 0 then None
+                        else Some input);
                     },
                     overflow_vertex.id )
-                  :: edges_flow )))
+                  :: new_edges_flow )))
         in
         new_state, new_inputs, new_edges_flow)
       g (state, inputs, [])
