@@ -455,19 +455,25 @@ let add_money_to_graph
       (fun acc scc ->
         if List.length scc = 1 then process_vertex (List.hd scc) acc
         else
-          List.fold_left
-            (fun acc v ->
-              let state, inputs, edges_flow, filling_state = acc in
-              let new_state, new_inputs, new_edges_flow, _ =
-                process_vertex v (state, inputs, edges_flow, filling_state)
-              in
-              let _, _, _, new_filling_state =
-                process_vertex v (new_state, inputs, edges_flow, filling_state)
-              in
-              (* we re-run computation to get the cross-lateralized basins
-                 filling status right *)
-              new_state, new_inputs, new_edges_flow, new_filling_state)
-            acc scc)
+          let state, inputs, edges_flow, filling_state = acc in
+          let new_state, new_inputs, new_edges_flow, _ =
+            List.fold_left
+              (fun acc v -> process_vertex v acc)
+              (state, inputs, edges_flow, filling_state)
+              scc
+          in
+          (* we re-run computation to get the cross-lateralized basins filling
+             status right *)
+          let _, _, _, new_filling_state =
+            List.fold_left
+              (fun acc v -> process_vertex v acc)
+              ( new_state,
+                VertexMap.map (fun _ -> money_from_units 0) inputs,
+                edges_flow,
+                filling_state )
+              scc
+          in
+          new_state, new_inputs, new_edges_flow, new_filling_state)
       (state, inputs, [], VertexMap.empty)
       sccs
   in
