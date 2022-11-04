@@ -162,7 +162,7 @@ let rec used_vertices (c : filling_condition) : VertexSet.t =
     VertexSet.union (used_vertices c1) (used_vertices c2)
   | CrossCollateralization (c, vs) -> VertexSet.union (used_vertices c) vs
 
-module MoneyGraphSCC = Graph.Components.Make (WaterfallGraph)
+module WaterfallGraphSCC = Graph.Components.Make (WaterfallGraph)
 
 let format_state fmt state =
   VertexMap.iter
@@ -203,7 +203,7 @@ let check_no_cycle (g : WaterfallGraph.t) : unit =
         | ControlFlow -> WaterfallGraph.remove_edge_e g e)
       g g
   in
-  let nb_components, _ = MoneyGraphSCC.scc g in
+  let nb_components, _ = WaterfallGraphSCC.scc g in
   if nb_components <> WaterfallGraph.nb_vertex g then failwith "Failed cycle"
 
 let check_state (g : WaterfallGraph.t) (state : state) : unit =
@@ -329,133 +329,147 @@ let add_money_to_graph
       (fun v _ -> if VertexId.equal v start then m else zero_money)
       state
   in
-  let new_state, _, edges_flow, filling_state =
-    WaterfallGraphTopological.fold
-      (fun (v : Vertex.t)
-           ((state, inputs, edges_flow, filling_state) :
-             state
-             * state
-             * (VertexId.t * PrintEdgeLabel.t * VertexId.t) list
-             * filling_state VertexMap.t) ->
-        let overflow_vertex =
-          WaterfallGraph.fold_succ_e
-            (fun e acc ->
-              match WaterfallGraph.E.label e with
-              | MoneyFlow Overflow -> Some (WaterfallGraph.E.dst e)
-              | _ -> acc)
-            g v None
-        in
-        let underflow_vertices, edges_flow =
-          WaterfallGraph.fold_succ_e
-            (fun e (acc, edges_flow) ->
-              match WaterfallGraph.E.label e with
-              | MoneyFlow (Underflow share) ->
-                VertexMap.add (WaterfallGraph.E.dst e).id share acc, edges_flow
-              | MoneyFlow Overflow -> acc, edges_flow
-              | ControlFlow ->
-                ( acc,
-                  ( v.id,
-                    { PrintEdgeLabel.label = ControlFlow; flow = None },
-                    (WaterfallGraph.E.dst e).id )
-                  :: edges_flow ))
-            g v
-            (VertexMap.empty, edges_flow)
-        in
-        let update_underflow state inputs to_underflow (edges_flow : 'a list) =
-          let new_state = aggregate_money state v.id to_underflow in
-          let new_inputs, new_edges_flow =
-            VertexMap.fold
-              (fun underflow_v share (new_inputs, new_edges_flow) ->
-                let flow = multiply_money to_underflow share in
-                ( aggregate_money new_inputs underflow_v flow,
-                  ( v.id,
-                    {
-                      PrintEdgeLabel.label = MoneyFlow (Underflow share);
-                      flow =
-                        (if flow = money_from_units 0 then None else Some flow);
-                    },
-                    underflow_v )
-                  :: new_edges_flow ))
-              underflow_vertices (inputs, edges_flow)
+  let process_vertex
+      (v : Vertex.t)
+      ((state, inputs, edges_flow, filling_state) :
+        state
+        * state
+        * (VertexId.t * PrintEdgeLabel.t * VertexId.t) list
+        * filling_state VertexMap.t) =
+    let overflow_vertex =
+      WaterfallGraph.fold_succ_e
+        (fun e acc ->
+          match WaterfallGraph.E.label e with
+          | MoneyFlow Overflow -> Some (WaterfallGraph.E.dst e)
+          | _ -> acc)
+        g v None
+    in
+    let underflow_vertices, edges_flow =
+      WaterfallGraph.fold_succ_e
+        (fun e (acc, edges_flow) ->
+          match WaterfallGraph.E.label e with
+          | MoneyFlow (Underflow share) ->
+            VertexMap.add (WaterfallGraph.E.dst e).id share acc, edges_flow
+          | MoneyFlow Overflow -> acc, edges_flow
+          | ControlFlow ->
+            ( acc,
+              ( v.id,
+                { PrintEdgeLabel.label = ControlFlow; flow = None },
+                (WaterfallGraph.E.dst e).id )
+              :: edges_flow ))
+        g v
+        (VertexMap.empty, edges_flow)
+    in
+    let update_underflow state inputs to_underflow (edges_flow : 'a list) =
+      let new_state = aggregate_money state v.id to_underflow in
+      let new_inputs, new_edges_flow =
+        VertexMap.fold
+          (fun underflow_v share (new_inputs, new_edges_flow) ->
+            let flow = multiply_money to_underflow share in
+            ( aggregate_money new_inputs underflow_v flow,
+              ( v.id,
+                {
+                  PrintEdgeLabel.label = MoneyFlow (Underflow share);
+                  flow = (if flow = money_from_units 0 then None else Some flow);
+                },
+                underflow_v )
+              :: new_edges_flow ))
+          underflow_vertices (inputs, edges_flow)
+      in
+      new_state, new_inputs, new_edges_flow
+    in
+    let input : money = VertexMap.find v.id inputs in
+    let new_state, new_inputs, new_edges_flow, new_filling_state =
+      match v.Vertex.vertex_type with
+      | Sink ->
+        aggregate_money state v.id input, inputs, edges_flow, filling_state
+      | NodeWithoutOverflow ->
+        let x, y, z = update_underflow state inputs input edges_flow in
+        x, y, z, filling_state
+      | NodeWithOverflow filling_condition -> (
+        match
+          interpret_filling_condition state
+            (VertexMap.find v.id state)
+            filling_condition
+        with
+        | Remaining remaining ->
+          let to_underflow = if input > remaining then remaining else input in
+          let to_overflow =
+            if input > remaining then Some (sub_money input remaining) else None
           in
-          new_state, new_inputs, new_edges_flow
-        in
-        let input : money = VertexMap.find v.id inputs in
-        let new_state, new_inputs, new_edges_flow, new_filling_state =
-          match v.Vertex.vertex_type with
-          | Sink ->
-            aggregate_money state v.id input, inputs, edges_flow, filling_state
-          | NodeWithoutOverflow ->
-            let x, y, z = update_underflow state inputs input edges_flow in
-            x, y, z, filling_state
-          | NodeWithOverflow filling_condition -> (
-            match
-              interpret_filling_condition state
-                (VertexMap.find v.id state)
-                filling_condition
-            with
-            | Remaining remaining ->
-              let to_underflow =
-                if input > remaining then remaining else input
-              in
-              let to_overflow =
-                if input > remaining then Some (sub_money input remaining)
-                else None
-              in
 
-              let new_state, new_inputs, new_edges_flow =
-                update_underflow state inputs to_underflow edges_flow
+          let new_state, new_inputs, new_edges_flow =
+            update_underflow state inputs to_underflow edges_flow
+          in
+          let new_inputs, new_edges_flow =
+            match overflow_vertex, to_overflow with
+            | Some overflow_vertex, Some to_overflow ->
+              ( aggregate_money new_inputs overflow_vertex.id to_overflow,
+                ( v.id,
+                  {
+                    PrintEdgeLabel.label = MoneyFlow Overflow;
+                    flow = Some to_overflow;
+                  },
+                  overflow_vertex.id )
+                :: new_edges_flow )
+            | Some overflow_vertex, None ->
+              ( new_inputs,
+                ( v.id,
+                  { PrintEdgeLabel.label = MoneyFlow Overflow; flow = None },
+                  overflow_vertex.id )
+                :: new_edges_flow )
+            | None, None -> new_inputs, new_edges_flow
+            | None, Some _ -> failwith "inconsistent state!"
+          in
+          ( new_state,
+            new_inputs,
+            new_edges_flow,
+            VertexMap.add v.id
+              (if Option.is_some to_overflow then Full
+              else Remaining (sub_money remaining to_underflow))
+              filling_state )
+        | Full -> (
+          let new_state, new_inputs, new_edges_flow =
+            update_underflow state inputs (money_from_units 0) edges_flow
+          in
+          match overflow_vertex with
+          | None -> failwith "node full but no overflow sucessor!"
+          | Some overflow_vertex ->
+            ( new_state,
+              aggregate_money new_inputs overflow_vertex.id input,
+              ( v.id,
+                {
+                  PrintEdgeLabel.label = MoneyFlow Overflow;
+                  flow =
+                    (if input = money_from_units 0 then None else Some input);
+                },
+                overflow_vertex.id )
+              :: new_edges_flow,
+              VertexMap.add v.id Full filling_state )))
+    in
+    new_state, new_inputs, new_edges_flow, new_filling_state
+  in
+  let sccs = List.rev (WaterfallGraphSCC.scc_list g) in
+  let new_state, _, edges_flow, filling_state =
+    List.fold_left
+      (fun acc scc ->
+        if List.length scc = 1 then process_vertex (List.hd scc) acc
+        else
+          List.fold_left
+            (fun acc v ->
+              let state, inputs, edges_flow, filling_state = acc in
+              let new_state, new_inputs, new_edges_flow, _ =
+                process_vertex v (state, inputs, edges_flow, filling_state)
               in
-              let new_inputs, new_edges_flow =
-                match overflow_vertex, to_overflow with
-                | Some overflow_vertex, Some to_overflow ->
-                  ( aggregate_money new_inputs overflow_vertex.id to_overflow,
-                    ( v.id,
-                      {
-                        PrintEdgeLabel.label = MoneyFlow Overflow;
-                        flow = Some to_overflow;
-                      },
-                      overflow_vertex.id )
-                    :: new_edges_flow )
-                | Some overflow_vertex, None ->
-                  ( new_inputs,
-                    ( v.id,
-                      { PrintEdgeLabel.label = MoneyFlow Overflow; flow = None },
-                      overflow_vertex.id )
-                    :: new_edges_flow )
-                | None, None -> new_inputs, new_edges_flow
-                | None, Some _ -> failwith "inconsistent state!"
+              let _, _, _, new_filling_state =
+                process_vertex v (new_state, inputs, edges_flow, filling_state)
               in
-              ( new_state,
-                new_inputs,
-                new_edges_flow,
-                VertexMap.add v.id
-                  (if Option.is_some to_overflow then Full
-                  else Remaining (sub_money remaining to_underflow))
-                  filling_state )
-            | Full -> (
-              let new_state, new_inputs, new_edges_flow =
-                update_underflow state inputs (money_from_units 0) edges_flow
-              in
-              match overflow_vertex with
-              | None -> failwith "node full but no overflow sucessor!"
-              | Some overflow_vertex ->
-                ( new_state,
-                  aggregate_money new_inputs overflow_vertex.id input,
-                  ( v.id,
-                    {
-                      PrintEdgeLabel.label = MoneyFlow Overflow;
-                      flow =
-                        (if input = money_from_units 0 then None
-                        else Some input);
-                    },
-                    overflow_vertex.id )
-                  :: new_edges_flow,
-                  VertexMap.add v.id Full filling_state )))
-        in
-        new_state, new_inputs, new_edges_flow, new_filling_state)
-      g
+              (* we re-run computation to get the cross-lateralized basins
+                 filling status right *)
+              new_state, new_inputs, new_edges_flow, new_filling_state)
+            acc scc)
       (state, inputs, [], VertexMap.empty)
+      sccs
   in
   let delta_graph =
     WaterfallGraph.fold_vertex
