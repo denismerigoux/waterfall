@@ -265,20 +265,64 @@ let aggregate_money (state : money VertexMap.t) (v : VertexId.t) (extra : money)
       | Some old_m -> Some (add_money extra old_m))
     state
 
+module PrintVertex = struct
+  type t = {
+    id : VertexId.t;
+    vertex_type : vertex_type;
+    subgraph : Graph.Graphviz.DotAttributes.subgraph option;
+    money_flowed : money;
+    delta : money;
+  }
+
+  let compare x y = VertexId.compare x.id y.id
+  let hash x = VertexId.hash x.id
+  let equal x y = VertexId.equal x.id y.id
+end
+
+module PrintEdgeLabel = struct
+  type t = { label : EdgeLabel.t; flow : money option }
+
+  let default = { label = MoneyFlow Overflow; flow = None }
+  let compare = compare
+end
+
+module PrintWaterfallGraph =
+  Graph.Persistent.Digraph.ConcreteLabeled (PrintVertex) (PrintEdgeLabel)
+
+let get_delta_node
+    (v : Vertex.t)
+    (state : state)
+    (previous_state : state option) : PrintVertex.t =
+  {
+    PrintVertex.id = v.id;
+    vertex_type = v.vertex_type;
+    subgraph = v.subgraph;
+    money_flowed = VertexMap.find v.id state;
+    delta =
+      (match previous_state with
+      | None -> money_from_units 0
+      | Some previous_state ->
+        sub_money
+          (VertexMap.find v.id state)
+          (VertexMap.find v.id previous_state));
+  }
+
 let add_money_to_graph
     (g : WaterfallGraph.t)
     (state : state)
     (start : VertexId.t)
-    (m : money) : state =
+    (m : money) : state * PrintWaterfallGraph.t =
   check_consistency g state;
   let inputs =
     VertexMap.mapi
       (fun v _ -> if VertexId.equal v start then m else zero_money)
       state
   in
-  let state, _ =
+  let new_state, _, edges_flow =
     WaterfallGraphTopological.fold
-      (fun (v : Vertex.t) ((state, inputs) : state * state) ->
+      (fun (v : Vertex.t)
+           ((state, inputs, edges_flow) :
+             state * state * (VertexId.t * PrintEdgeLabel.t * VertexId.t) list) ->
         let overflow_vertex =
           WaterfallGraph.fold_succ_e
             (fun e acc ->
@@ -296,100 +340,128 @@ let add_money_to_graph
               | _ -> acc)
             g v VertexMap.empty
         in
-        let update_underflow state inputs to_underflow =
+        let update_underflow state inputs to_underflow (edges_flow : 'a list) =
           let new_state = aggregate_money state v.id to_underflow in
-          let new_inputs =
+          let new_inputs, new_edges_flow =
             VertexMap.fold
-              (fun underflow_v share new_inputs ->
-                aggregate_money new_inputs underflow_v
-                  (multiply_money to_underflow share))
-              underflow_vertices inputs
+              (fun underflow_v share (new_inputs, new_edges_flow) ->
+                let flow = multiply_money to_underflow share in
+                ( aggregate_money new_inputs underflow_v flow,
+                  ( v.id,
+                    {
+                      PrintEdgeLabel.label = MoneyFlow (Underflow share);
+                      flow =
+                        (if flow = money_from_units 0 then None else Some flow);
+                    },
+                    underflow_v )
+                  :: new_edges_flow ))
+              underflow_vertices (inputs, edges_flow)
           in
-          new_state, new_inputs
+          new_state, new_inputs, new_edges_flow
         in
         let input : money = VertexMap.find v.id inputs in
-        match v.Vertex.vertex_type with
-        | Sink -> aggregate_money state v.id input, inputs
-        | NodeWithoutOverflow -> update_underflow state inputs input
-        | NodeWithOverflow filling_condition -> (
-          match
-            interpret_filling_condition state
-              (VertexMap.find v.id state)
-              filling_condition
-          with
-          | Remaining remaining ->
-            let to_underflow = if input > remaining then remaining else input in
-            let to_overflow =
-              if input > remaining then Some (sub_money input remaining)
-              else None
-            in
+        let new_state, new_inputs, new_edges_flow =
+          match v.Vertex.vertex_type with
+          | Sink -> aggregate_money state v.id input, inputs, edges_flow
+          | NodeWithoutOverflow ->
+            update_underflow state inputs input edges_flow
+          | NodeWithOverflow filling_condition -> (
+            match
+              interpret_filling_condition state
+                (VertexMap.find v.id state)
+                filling_condition
+            with
+            | Remaining remaining ->
+              let to_underflow =
+                if input > remaining then remaining else input
+              in
+              let to_overflow =
+                if input > remaining then Some (sub_money input remaining)
+                else None
+              in
 
-            let new_state, new_inputs =
-              update_underflow state inputs to_underflow
-            in
-            let new_inputs =
-              match overflow_vertex, to_overflow with
-              | Some overflow_vertex, Some to_overflow ->
-                aggregate_money new_inputs overflow_vertex.id to_overflow
-              | None, None | Some _, None -> new_inputs
-              | None, Some _ -> failwith "inconsistent state!"
-            in
-            new_state, new_inputs
-          | Full -> (
-            match overflow_vertex with
-            | None -> failwith "node full but no overflow sucessor!"
-            | Some overflow_vertex ->
-              state, aggregate_money inputs overflow_vertex.id input)))
-      g (state, inputs)
+              let new_state, new_inputs, new_edges_flow =
+                update_underflow state inputs to_underflow edges_flow
+              in
+              let new_inputs, new_edges_flow =
+                match overflow_vertex, to_overflow with
+                | Some overflow_vertex, Some to_overflow ->
+                  ( aggregate_money new_inputs overflow_vertex.id to_overflow,
+                    ( v.id,
+                      {
+                        PrintEdgeLabel.label = MoneyFlow Overflow;
+                        flow = Some to_overflow;
+                      },
+                      overflow_vertex.id )
+                    :: new_edges_flow )
+                | Some overflow_vertex, None ->
+                  ( new_inputs,
+                    ( v.id,
+                      { PrintEdgeLabel.label = MoneyFlow Overflow; flow = None },
+                      overflow_vertex.id )
+                    :: new_edges_flow )
+                | None, None -> new_inputs, new_edges_flow
+                | None, Some _ -> failwith "inconsistent state!"
+              in
+              new_state, new_inputs, new_edges_flow
+            | Full -> (
+              match overflow_vertex with
+              | None -> failwith "node full but no overflow sucessor!"
+              | Some overflow_vertex ->
+                ( state,
+                  aggregate_money inputs overflow_vertex.id input,
+                  ( v.id,
+                    {
+                      PrintEdgeLabel.label = MoneyFlow Overflow;
+                      flow = Some input;
+                    },
+                    overflow_vertex.id )
+                  :: edges_flow )))
+        in
+        new_state, new_inputs, new_edges_flow)
+      g (state, inputs, [])
   in
-  state
-
-module PrintVertex = struct
-  type t = {
-    id : VertexId.t;
-    vertex_type : vertex_type;
-    subgraph : Graph.Graphviz.DotAttributes.subgraph option;
-    money_flowed : money;
-    delta : money;
-  }
-
-  let compare x y = VertexId.compare x.id y.id
-  let hash x = VertexId.hash x.id
-  let equal x y = VertexId.equal x.id y.id
-end
-
-module PrintWaterfallGraph =
-  Graph.Persistent.Digraph.ConcreteLabeled (PrintVertex) (EdgeLabel)
+  let delta_graph =
+    WaterfallGraph.fold_vertex
+      (fun v delta_graph ->
+        PrintWaterfallGraph.add_vertex delta_graph
+          (get_delta_node v new_state (Some state)))
+      g PrintWaterfallGraph.empty
+  in
+  let delta_graph_nodes =
+    PrintWaterfallGraph.fold_vertex
+      (fun v nodes -> VertexMap.add v.id v nodes)
+      delta_graph VertexMap.empty
+  in
+  let delta_graph =
+    List.fold_left
+      (fun delta_graph (src_id, l, dst_id) ->
+        PrintWaterfallGraph.add_edge_e delta_graph
+          ( VertexMap.find src_id delta_graph_nodes,
+            l,
+            VertexMap.find dst_id delta_graph_nodes ))
+      delta_graph edges_flow
+  in
+  new_state, delta_graph
 
 let to_printable_graph
     (g : WaterfallGraph.t)
     ?(previous_state : state option)
     (state : state) : PrintWaterfallGraph.t =
   let g' = PrintWaterfallGraph.empty in
-  let transform_node (v : Vertex.t) : PrintVertex.t =
-    {
-      PrintVertex.id = v.id;
-      vertex_type = v.vertex_type;
-      subgraph = v.subgraph;
-      money_flowed = VertexMap.find v.id state;
-      delta =
-        (match previous_state with
-        | None -> money_from_units 0
-        | Some previous_state ->
-          sub_money
-            (VertexMap.find v.id state)
-            (VertexMap.find v.id previous_state));
-    }
-  in
   let g' =
     WaterfallGraph.fold_vertex
-      (fun v g' -> PrintWaterfallGraph.add_vertex g' (transform_node v))
+      (fun v g' ->
+        PrintWaterfallGraph.add_vertex g'
+          (get_delta_node v state previous_state))
       g g'
   in
   WaterfallGraph.fold_edges_e
     (fun (src, l, dst) g' ->
       PrintWaterfallGraph.add_edge_e g'
-        (transform_node src, l, transform_node dst))
+        ( get_delta_node src state previous_state,
+          { label = l; flow = None },
+          get_delta_node dst state previous_state ))
     g g'
 
 module Printer = Graph.Graphviz.Dot (struct
@@ -446,11 +518,17 @@ module Printer = Graph.Graphviz.Dot (struct
     []
 
   let edge_attributes (e : E.t) : Graph.Graphviz.DotAttributes.edge list =
-    match PrintWaterfallGraph.E.label e with
+    let flow_str =
+      match (PrintWaterfallGraph.E.label e).flow with
+      | None -> ""
+      | Some flow -> Format.asprintf "\nΔ→%a" format_money flow
+    in
+    match (PrintWaterfallGraph.E.label e).label with
     | ControlFlow -> [`Style `Dotted; `Arrowhead `Normal; `Constraint false]
-    | MoneyFlow Overflow -> [`Label "■100\\%"]
+    | MoneyFlow Overflow -> [`Label ("■100\\%" ^ flow_str)]
     | MoneyFlow (Underflow s) -> (
       match (PrintWaterfallGraph.E.src e).vertex_type with
-      | NodeWithOverflow _ -> [`Label (Format.asprintf "⬓%a" format_share s)]
-      | _ -> [`Label (Format.asprintf "%a" format_share s)])
+      | NodeWithOverflow _ ->
+        [`Label (Format.asprintf "⬓%a%s" format_share s flow_str)]
+      | _ -> [`Label (Format.asprintf "%a%s" format_share s flow_str)])
 end)

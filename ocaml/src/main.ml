@@ -158,39 +158,35 @@ let () =
     Format.printf "--> Current state:\n%a" format_state state
   in
 
-  let state2 =
+  let state2, delta_graph12 =
     add_money_to_graph g state1 cinema_source_id (money_from_units 10_000)
   in
   display state2;
   let oc = open_out "graph1.dot" in
   let fmt = Format.formatter_of_out_channel oc in
-  let g' = to_printable_graph g state2 ~previous_state:state1 in
-  Printer.fprint_graph fmt g';
+  Printer.fprint_graph fmt delta_graph12;
   close_out oc;
-  let state3 =
+  let state3, deltagraph23 =
     add_money_to_graph g state2 cinema_source_id (money_from_units 10_000)
   in
   display state3;
   let oc = open_out "graph2.dot" in
   let fmt = Format.formatter_of_out_channel oc in
-  let g' = to_printable_graph g state3 ~previous_state:state2 in
-  Printer.fprint_graph fmt g';
+  Printer.fprint_graph fmt deltagraph23;
   close_out oc;
-  let state4 =
+  let state4, delta_graph34 =
     add_money_to_graph g state3 tv_source_id (money_from_units 20_000)
   in
   display state4;
   let oc = open_out "graph3.dot" in
   let fmt = Format.formatter_of_out_channel oc in
-  let g' = to_printable_graph g state4 ~previous_state:state3 in
-  Printer.fprint_graph fmt g';
+  Printer.fprint_graph fmt delta_graph34;
   close_out oc;
-  let state5 =
+  let state5, delta_graph45 =
     add_money_to_graph g state4 cinema_source_id (money_from_units 20_000)
   in
   display state5;
   let oc = open_out "graph4.dot" in
   let fmt = Format.formatter_of_out_channel oc in
-  let g' = to_printable_graph g state5 ~previous_state:state4 in
-  Printer.fprint_graph fmt g';
+  Printer.fprint_graph fmt delta_graph45;
   close_out oc

@@ -74,10 +74,14 @@ val used_vertices : filling_condition -> VertexSet.t
 val aggregate_money :
   money VertexMap.t -> VertexId.t -> money -> money VertexMap.t
 
-val add_money_to_graph :
-  WaterfallGraph.t -> state -> VertexId.t -> money -> state
-
 module PrintWaterfallGraph : Graph.Sig.G
+
+val add_money_to_graph :
+  WaterfallGraph.t ->
+  state ->
+  VertexId.t ->
+  money ->
+  state * PrintWaterfallGraph.t
 
 val to_printable_graph :
   WaterfallGraph.t -> ?previous_state:state -> state -> PrintWaterfallGraph.t
