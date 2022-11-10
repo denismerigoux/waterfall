@@ -190,11 +190,11 @@ let check_control_edges (g : WaterfallGraph.t) : unit =
   WaterfallGraph.iter_vertex
     (fun v ->
       let control_vertices =
-        WaterfallGraph.fold_succ_e
+        WaterfallGraph.fold_pred_e
           (fun e control_vertices ->
             match WaterfallGraph.E.label e with
             | ControlFlow ->
-              VertexSet.add (WaterfallGraph.E.dst e).id control_vertices
+              VertexSet.add (WaterfallGraph.E.src e).id control_vertices
             | MoneyFlow _ -> control_vertices)
           g v VertexSet.empty
       in

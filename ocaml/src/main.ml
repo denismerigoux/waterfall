@@ -126,7 +126,7 @@ let () =
   let platform_control_basin_v =
     {
       Vertex.id = platform_control_basin_id;
-      vertex_type = NodeWithOverflow (Cutoff (money_from_units 100));
+      vertex_type = NodeWithOverflow (Cutoff (money_from_units 10_000));
       subgraph = Some waterfall_platform;
     }
   in
@@ -134,7 +134,7 @@ let () =
   let cinema_first_basin_v =
     {
       Vertex.id = cinema_first_basin_id;
-      vertex_type = NodeWithOverflow (Cutoff (money_from_units 100));
+      vertex_type = NodeWithOverflow (Cutoff (money_from_units 10_000));
       subgraph = Some waterfall_cine;
     }
   in
@@ -148,11 +148,7 @@ let () =
   let cinema_second_basin_v =
     {
       Vertex.id = cinema_second_basin_id;
-      vertex_type =
-        NodeWithOverflow
-          (CrossCollateralization
-             ( Cutoff (money_from_units 5_000),
-               VertexSet.singleton cinema_first_basin_id ));
+      vertex_type = NodeWithOverflow (Cutoff (money_from_units 40_000));
       subgraph = Some waterfall_cine;
     }
   in
@@ -181,7 +177,7 @@ let () =
       vertex_type =
         NodeWithOverflow
           (CrossCollateralization
-             ( Cutoff (money_from_units 500),
+             ( Cutoff (money_from_units 50_000),
                VertexSet.of_list
                  [cinema_control_basin_id; platform_control_basin_id] ));
       subgraph = Some waterfall_tv;
@@ -213,7 +209,7 @@ let () =
   let soutien_prod_first_basin_v =
     {
       Vertex.id = soutien_prod_first_basin_id;
-      vertex_type = NodeWithOverflow (Cutoff (money_from_units 150_000));
+      vertex_type = NodeWithOverflow (Cutoff (money_from_units 15_000));
       subgraph = Some waterfall_soutien_prod;
     }
   in
@@ -351,16 +347,14 @@ let () =
       WaterfallGraph.E.create soutien_prod_second_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 20)))
         distributor_v;
-      WaterfallGraph.E.create tv_first_basin_v EdgeLabel.ControlFlow
-        cinema_control_basin_v;
-      WaterfallGraph.E.create tv_first_basin_v EdgeLabel.ControlFlow
-        platform_control_basin_v;
-      WaterfallGraph.E.create cinema_second_basin_v EdgeLabel.ControlFlow
-        cinema_first_basin_v;
-      WaterfallGraph.E.create cinema_third_basin_v EdgeLabel.ControlFlow
-        platform_control_basin_v;
-      WaterfallGraph.E.create cinema_third_basin_v EdgeLabel.ControlFlow
-        soutien_prod_first_basin_v;
+      WaterfallGraph.E.create cinema_control_basin_v EdgeLabel.ControlFlow
+        tv_first_basin_v;
+      WaterfallGraph.E.create platform_control_basin_v EdgeLabel.ControlFlow
+        tv_first_basin_v;
+      WaterfallGraph.E.create platform_control_basin_v EdgeLabel.ControlFlow
+        cinema_third_basin_v;
+      WaterfallGraph.E.create soutien_prod_first_basin_v EdgeLabel.ControlFlow
+        cinema_third_basin_v;
     ]
   in
   let g = WaterfallGraph.empty in
@@ -373,13 +367,24 @@ let () =
       (fun v state -> VertexMap.add v.id (money_from_units 0) state)
       g VertexMap.empty
   in
-  (* Format.printf "\n"; let display state = Format.printf "--> Current
-     state:\n%a" format_state state in
-
-     let state2, delta_graph12 = add_money_to_graph g state1 cinema_source_id
-     (money_from_units 10_000) in display state2; *)
+  let state2, delta_graph12 =
+    add_money_to_graph g state1 cinema_source_id (money_from_units 100_000)
+  in
   let oc = open_out "graph1.dot" in
   let fmt = Format.formatter_of_out_channel oc in
-  Printer.fprint_graph fmt (to_printable_graph g state1);
+  Printer.fprint_graph fmt delta_graph12;
   close_out oc;
-  check_consistency g state1
+  let state3, delta_graph23 =
+    add_money_to_graph g state2 platform_source_id (money_from_units 200_000)
+  in
+  let oc = open_out "graph2.dot" in
+  let fmt = Format.formatter_of_out_channel oc in
+  Printer.fprint_graph fmt delta_graph23;
+  close_out oc;
+  let _state4, delta_graph34 =
+    add_money_to_graph g state3 tv_source_id (money_from_units 150_000)
+  in
+  let oc = open_out "graph3.dot" in
+  let fmt = Format.formatter_of_out_channel oc in
+  Printer.fprint_graph fmt delta_graph34;
+  close_out oc
