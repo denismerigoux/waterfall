@@ -538,24 +538,26 @@ module Printer = Graph.Graphviz.Dot (struct
         `Shape `Doubleoctagon;
         `HtmlLabel
           (Format.asprintf "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a"
-             VertexId.format v.id format_money v.money_flowed
+             VertexId.format v.id format_money
+             (sub_money v.money_flowed v.delta)
              (fun fmt delta ->
                if delta = money_from_units 0 then Format.fprintf fmt ""
                else
-                 Format.fprintf fmt "<BR/><FONT COLOR=\'#00691c\'>+%a</FONT>"
-                   format_money delta)
+                 Format.fprintf fmt "<FONT COLOR=\'#00691c\'> → %a</FONT>"
+                   format_money v.money_flowed)
              v.delta);
       ]
     | NodeWithoutOverflow ->
       [
         `HtmlLabel
           (Format.asprintf "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a"
-             VertexId.format v.id format_money v.money_flowed
+             VertexId.format v.id format_money
+             (sub_money v.money_flowed v.delta)
              (fun fmt delta ->
                if delta = money_from_units 0 then Format.fprintf fmt ""
                else
-                 Format.fprintf fmt "<BR/><FONT COLOR=\'#00691c\'>+%a</FONT>"
-                   format_money delta)
+                 Format.fprintf fmt "<FONT COLOR=\'#00691c\'> → %a</FONT>"
+                   format_money v.money_flowed)
              v.delta);
       ]
     | NodeWithOverflow c ->
@@ -563,21 +565,22 @@ module Printer = Graph.Graphviz.Dot (struct
         `Shape `Box3d;
         `HtmlLabel
           (Format.asprintf
-             "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a<BR/><FONT \
-              COLOR='#008aa6'>■: %a</FONT>%a"
-             VertexId.format v.id format_money v.money_flowed
+             "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a%a<BR/><FONT \
+              COLOR='#008aa6'>■: %a</FONT>"
+             VertexId.format v.id format_money
+             (sub_money v.money_flowed v.delta)
+             (fun fmt delta ->
+               if delta = money_from_units 0 then Format.fprintf fmt ""
+               else
+                 Format.fprintf fmt "<FONT COLOR=\'#00691c\'> → %a</FONT>"
+                   format_money v.money_flowed)
+             v.delta
              (fun fmt filling_state ->
                match filling_state with
                | None -> Format.fprintf fmt ""
                | Some filling_state ->
                  Format.fprintf fmt " %a" format_filling_state filling_state)
-             v.filling_state format_filling_condition c
-             (fun fmt delta ->
-               if delta = money_from_units 0 then Format.fprintf fmt ""
-               else
-                 Format.fprintf fmt "<BR/><FONT COLOR=\'#00691c\'>+%a</FONT>"
-                   format_money delta)
-             v.delta);
+             v.filling_state format_filling_condition c);
       ]
 
   let get_subgraph (v : V.t) : Graph.Graphviz.DotAttributes.subgraph option =
@@ -592,7 +595,7 @@ module Printer = Graph.Graphviz.Dot (struct
       match (PrintWaterfallGraph.E.label e).flow with
       | None -> ""
       | Some flow ->
-        Format.asprintf "<BR/><FONT COLOR=\'#00691c\'>%a</FONT>" format_money
+        Format.asprintf "<BR/><FONT COLOR=\'#00691c\'>+%a</FONT>" format_money
           flow
     in
     match (PrintWaterfallGraph.E.label e).label with
