@@ -8,7 +8,7 @@ let money_from_cents i = Z.of_int i
 let zero_money = Z.zero
 
 let format_money (fmt : Format.formatter) (m : money) =
-  Format.fprintf fmt "%s €" (Q.to_string Q.(of_bigint m / of_int 100))
+  Format.fprintf fmt "%#d €" (Q.to_int Q.(of_bigint m / of_int 100))
 
 type share = Q.t
 (** Fraction between 0 and 1*)
@@ -115,7 +115,7 @@ end
 module WaterfallGraph =
   Graph.Persistent.Digraph.ConcreteLabeled (Vertex) (EdgeLabel)
 
-type filling_state = Remaining of money | Full
+type filling_state = Remaining of money | Full | NoLimit
 
 let format_filling_state (fmt : Format.formatter) (s : filling_state) : unit =
   match s with
@@ -123,6 +123,8 @@ let format_filling_state (fmt : Format.formatter) (s : filling_state) : unit =
     Format.fprintf fmt "<FONT COLOR='#cf7317'>(%a remaining)</FONT>"
       format_money remaining
   | Full -> Format.fprintf fmt "<FONT COLOR=\'#700009\'>(full)</FONT>"
+  | NoLimit ->
+    Format.fprintf fmt "<FONT COLOR=\'#8045b8\'>(not yet full)</FONT>"
 
 type state = money VertexMap.t
 
@@ -141,6 +143,7 @@ let rec interpret_filling_condition
         interpret_filling_condition g state current_fill c2 )
     with
     | Full, Full -> Full
+    | NoLimit, _ | _, NoLimit -> NoLimit
     | Full, Remaining r | Remaining r, Full -> Remaining r
     | Remaining r1, Remaining r2 -> Remaining (max r1 r2))
   | Disjunction (c1, c2) -> (
@@ -149,19 +152,25 @@ let rec interpret_filling_condition
         interpret_filling_condition g state current_fill c2 )
     with
     | Full, _ | _, Full -> Full
+    | Remaining r, NoLimit | NoLimit, Remaining r -> Remaining r
+    | NoLimit, NoLimit -> NoLimit
     | Remaining r1, Remaining r2 -> Remaining (min r1 r2))
-  | WhenOtherBasinFilled v_id ->
+  | WhenOtherBasinFilled v_id -> (
     let v =
       WaterfallGraph.fold_vertex
         (fun v' acc ->
           if VertexId.equal v'.Vertex.id v_id then Some v' else acc)
         g None
     in
-    interpret_filling_condition g state
-      (VertexMap.find v_id state)
-      (match (Option.get v).vertex_type with
-      | NodeWithOverflow f -> f
-      | _ -> assert false)
+    match
+      interpret_filling_condition g state
+        (VertexMap.find v_id state)
+        (match (Option.get v).vertex_type with
+        | NodeWithOverflow f -> f
+        | _ -> assert false)
+    with
+    | Full -> Full
+    | _ -> NoLimit)
   | CrossCollateralization (c, vs) ->
     let new_current_fill =
       VertexSet.fold
@@ -408,6 +417,20 @@ let add_money_to_graph
             (VertexMap.find v.id state)
             filling_condition
         with
+        | NoLimit ->
+          let new_state, new_inputs, new_edges_flow =
+            update_underflow state inputs input edges_flow
+          in
+          ( new_state,
+            new_inputs,
+            (match overflow_vertex with
+            | Some overflow_vertex ->
+              ( v.id,
+                { PrintEdgeLabel.label = MoneyFlow Overflow; flow = None },
+                overflow_vertex.id )
+              :: new_edges_flow
+            | None -> new_edges_flow),
+            VertexMap.add v.id NoLimit filling_state )
         | Remaining remaining ->
           let to_underflow = if input > remaining then remaining else input in
           let to_overflow =

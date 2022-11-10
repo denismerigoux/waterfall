@@ -62,7 +62,7 @@ end
 module WaterfallGraph :
   Graph.Sig.P with type V.t = Vertex.t and type E.label = EdgeLabel.t
 
-type filling_state = Remaining of money | Full
+type filling_state = Remaining of money | Full | NoLimit
 type state = money VertexMap.t
 
 val check_consistency : WaterfallGraph.t -> state -> unit
