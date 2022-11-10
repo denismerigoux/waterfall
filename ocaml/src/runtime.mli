@@ -30,6 +30,7 @@ type filling_condition =
   | Conjunction of filling_condition * filling_condition
   | Disjunction of filling_condition * filling_condition
   | Cutoff of money
+  | WhenOtherBasinFilled of VertexId.t
   | CrossCollateralization of filling_condition * VertexSet.t
 
 type vertex_type =
@@ -64,10 +65,11 @@ module WaterfallGraph :
 type filling_state = Remaining of money | Full
 type state = money VertexMap.t
 
+val check_consistency : WaterfallGraph.t -> state -> unit
 val format_state : Format.formatter -> state -> unit
 
 val interpret_filling_condition :
-  state -> money -> filling_condition -> filling_state
+  WaterfallGraph.t -> state -> money -> filling_condition -> filling_state
 
 val used_vertices : filling_condition -> VertexSet.t
 

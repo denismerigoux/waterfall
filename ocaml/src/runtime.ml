@@ -64,6 +64,7 @@ type filling_condition =
   | Conjunction of filling_condition * filling_condition
   | Disjunction of filling_condition * filling_condition
   | Cutoff of money
+  | WhenOtherBasinFilled of VertexId.t
   | CrossCollateralization of filling_condition * VertexSet.t
 
 let rec format_filling_condition
@@ -77,6 +78,7 @@ let rec format_filling_condition
   | Disjunction (c1, c2) ->
     Format.fprintf fmt "(%a) or (%a)" format_filling_condition c1
       format_filling_condition c2
+  | WhenOtherBasinFilled v -> Format.fprintf fmt "%a filled" VertexId.format v
   | CrossCollateralization (c, vs) ->
     Format.fprintf fmt "(%a) taking in %a" format_filling_condition c
       (Format.pp_print_list
@@ -125,6 +127,7 @@ let format_filling_state (fmt : Format.formatter) (s : filling_state) : unit =
 type state = money VertexMap.t
 
 let rec interpret_filling_condition
+    (g : WaterfallGraph.t)
     (state : state)
     (current_fill : money)
     (c : filling_condition) : filling_state =
@@ -134,32 +137,45 @@ let rec interpret_filling_condition
     else Remaining (sub_money cutoff current_fill)
   | Conjunction (c1, c2) -> (
     match
-      ( interpret_filling_condition state current_fill c1,
-        interpret_filling_condition state current_fill c2 )
+      ( interpret_filling_condition g state current_fill c1,
+        interpret_filling_condition g state current_fill c2 )
     with
     | Full, Full -> Full
     | Full, Remaining r | Remaining r, Full -> Remaining r
     | Remaining r1, Remaining r2 -> Remaining (max r1 r2))
   | Disjunction (c1, c2) -> (
     match
-      ( interpret_filling_condition state current_fill c1,
-        interpret_filling_condition state current_fill c2 )
+      ( interpret_filling_condition g state current_fill c1,
+        interpret_filling_condition g state current_fill c2 )
     with
     | Full, _ | _, Full -> Full
     | Remaining r1, Remaining r2 -> Remaining (min r1 r2))
+  | WhenOtherBasinFilled v_id ->
+    let v =
+      WaterfallGraph.fold_vertex
+        (fun v' acc ->
+          if VertexId.equal v'.Vertex.id v_id then Some v' else acc)
+        g None
+    in
+    interpret_filling_condition g state
+      (VertexMap.find v_id state)
+      (match (Option.get v).vertex_type with
+      | NodeWithOverflow f -> f
+      | _ -> assert false)
   | CrossCollateralization (c, vs) ->
     let new_current_fill =
       VertexSet.fold
         (fun v current_fill -> add_money current_fill (VertexMap.find v state))
         vs current_fill
     in
-    interpret_filling_condition state new_current_fill c
+    interpret_filling_condition g state new_current_fill c
 
 let rec used_vertices (c : filling_condition) : VertexSet.t =
   match c with
   | Cutoff _ -> VertexSet.empty
   | Conjunction (c1, c2) | Disjunction (c1, c2) ->
     VertexSet.union (used_vertices c1) (used_vertices c2)
+  | WhenOtherBasinFilled v -> VertexSet.singleton v
   | CrossCollateralization (c, vs) -> VertexSet.union (used_vertices c) vs
 
 module WaterfallGraphSCC = Graph.Components.Make (WaterfallGraph)
@@ -174,11 +190,11 @@ let check_control_edges (g : WaterfallGraph.t) : unit =
   WaterfallGraph.iter_vertex
     (fun v ->
       let control_vertices =
-        WaterfallGraph.fold_pred_e
+        WaterfallGraph.fold_succ_e
           (fun e control_vertices ->
             match WaterfallGraph.E.label e with
             | ControlFlow ->
-              VertexSet.add (WaterfallGraph.E.src e).id control_vertices
+              VertexSet.add (WaterfallGraph.E.dst e).id control_vertices
             | MoneyFlow _ -> control_vertices)
           g v VertexSet.empty
       in
@@ -388,7 +404,7 @@ let add_money_to_graph
         x, y, z, filling_state
       | NodeWithOverflow filling_condition -> (
         match
-          interpret_filling_condition state
+          interpret_filling_condition g state
             (VertexMap.find v.id state)
             filling_condition
         with
