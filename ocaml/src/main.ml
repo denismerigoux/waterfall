@@ -3,6 +3,7 @@ open Runtime
 [@@@warning "-26"]
 
 let () =
+  let distributor_total_id = VertexId.fresh "distributor_total" in
   let distributor1_id = VertexId.fresh "distributor1" in
   let distributor2_id = VertexId.fresh "distributor2" in
   let distributor3_id = VertexId.fresh "distributor3" in
@@ -11,6 +12,7 @@ let () =
   let distributor6_id = VertexId.fresh "distributor6" in
   let distributor7_id = VertexId.fresh "distributor7" in
   let distributor8_id = VertexId.fresh "distributor8" in
+  let producer_total_id = VertexId.fresh "producer_total" in
   let producer1_id = VertexId.fresh "producer1" in
   let producer2_id = VertexId.fresh "producer2" in
   let producer3_id = VertexId.fresh "producer3" in
@@ -19,10 +21,12 @@ let () =
   let producer6_id = VertexId.fresh "producer6" in
   let canal_plus1_id = VertexId.fresh "canal_plus1" in
   let canal_plus2_id = VertexId.fresh "canal_plus2" in
+  let canal_plus_total_id = VertexId.fresh "canal_plus_total" in
   let sofica1_id = VertexId.fresh "sofica1" in
   let sofica2_id = VertexId.fresh "sofica2" in
   let sofica3_id = VertexId.fresh "sofica3" in
   let sofica4_id = VertexId.fresh "sofica4" in
+  let sofica_total_id = VertexId.fresh "sofica_total" in
   let netflix_id = VertexId.fresh "netflix" in
 
   let soutien_prod_source_id = VertexId.fresh "soutien_prod_source" in
@@ -92,6 +96,13 @@ let () =
   let waterfall_soutien_distrib =
     {
       Graph.Graphviz.DotAttributes.sg_name = "waterfall_soutien_distrib";
+      Graph.Graphviz.DotAttributes.sg_attributes = [`Peripheries 0];
+      Graph.Graphviz.DotAttributes.sg_parent = None;
+    }
+  in
+  let sinks =
+    {
+      Graph.Graphviz.DotAttributes.sg_name = "sink";
       Graph.Graphviz.DotAttributes.sg_attributes = [`Peripheries 0];
       Graph.Graphviz.DotAttributes.sg_parent = None;
     }
@@ -238,105 +249,165 @@ let () =
   let producer1_v =
     {
       Vertex.id = producer1_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_cine;
     }
   in
   let producer2_v =
     {
       Vertex.id = producer2_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_cine;
     }
   in
   let producer3_v =
     {
       Vertex.id = producer3_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_tv;
     }
   in
   let producer4_v =
-    { Vertex.id = producer4_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = producer4_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_soutien_prod;
+    }
   in
   let producer5_v =
-    { Vertex.id = producer5_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = producer5_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_soutien_prod;
+    }
   in
   let producer6_v =
-    { Vertex.id = producer6_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = producer6_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_cine;
+    }
+  in
+  let producer_total_v =
+    { Vertex.id = producer_total_id; vertex_type = Sink; subgraph = Some sinks }
   in
   let distributor1_v =
     {
       Vertex.id = distributor1_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_cine;
     }
   in
   let distributor2_v =
     {
       Vertex.id = distributor2_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_cine;
     }
   in
   let distributor3_v =
     {
       Vertex.id = distributor3_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_cine;
     }
   in
   let distributor4_v =
     {
       Vertex.id = distributor4_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_tv;
     }
   in
   let distributor5_v =
     {
       Vertex.id = distributor5_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_tv;
     }
   in
   let distributor6_v =
     {
       Vertex.id = distributor6_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_tv;
     }
   in
   let distributor7_v =
     {
       Vertex.id = distributor7_id;
-      vertex_type = Sink;
+      vertex_type = NodeWithoutOverflow;
       subgraph = Some waterfall_soutien_distrib;
     }
   in
   let distributor8_v =
-    { Vertex.id = distributor8_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = distributor8_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_soutien_prod;
+    }
+  in
+  let distributor_total_v =
+    {
+      Vertex.id = distributor_total_id;
+      vertex_type = Sink;
+      subgraph = Some sinks;
+    }
   in
   let sofica1_v =
-    { Vertex.id = sofica1_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = sofica1_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_cine;
+    }
   in
   let sofica2_v =
-    { Vertex.id = sofica2_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = sofica2_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_cine;
+    }
   in
   let sofica3_v =
-    { Vertex.id = sofica3_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = sofica3_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_cine;
+    }
   in
   let sofica4_v =
-    { Vertex.id = sofica4_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = sofica4_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_tv;
+    }
+  in
+  let sofica_total_v =
+    { Vertex.id = sofica_total_id; vertex_type = Sink; subgraph = Some sinks }
   in
   let netflix_v =
-    { Vertex.id = netflix_id; vertex_type = Sink; subgraph = None }
+    { Vertex.id = netflix_id; vertex_type = Sink; subgraph = Some sinks }
   in
   let canal_plus1_v =
-    { Vertex.id = canal_plus1_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = canal_plus1_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_cine;
+    }
   in
   let canal_plus2_v =
-    { Vertex.id = canal_plus2_id; vertex_type = Sink; subgraph = None }
+    {
+      Vertex.id = canal_plus2_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_tv;
+    }
+  in
+  let canal_plus_total_v =
+    {
+      Vertex.id = canal_plus_total_id;
+      vertex_type = Sink;
+      subgraph = Some sinks;
+    }
   in
   let edges =
     [
@@ -436,18 +507,66 @@ let () =
       WaterfallGraph.E.create soutien_prod_second_basin_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 20)))
         distributor8_v;
-      WaterfallGraph.E.create cinema_control_basin_v EdgeLabel.ControlFlow
-        tv_first_basin_v;
-      WaterfallGraph.E.create platform_control_basin_v EdgeLabel.ControlFlow
-        tv_first_basin_v;
-      WaterfallGraph.E.create platform_control_basin_v EdgeLabel.ControlFlow
-        cinema_third_basin_v;
-      WaterfallGraph.E.create soutien_prod_first_basin_v EdgeLabel.ControlFlow
-        cinema_third_basin_v;
-      WaterfallGraph.E.create platform_control_basin_v EdgeLabel.ControlFlow
-        cinema_first_basin_v;
-      WaterfallGraph.E.create tv_control_basin_v EdgeLabel.ControlFlow
-        cinema_first_basin_v;
+      WaterfallGraph.E.create distributor1_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        distributor_total_v;
+      WaterfallGraph.E.create distributor2_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        distributor_total_v;
+      WaterfallGraph.E.create distributor3_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        distributor_total_v;
+      WaterfallGraph.E.create distributor4_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        distributor_total_v;
+      WaterfallGraph.E.create distributor5_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        distributor_total_v;
+      WaterfallGraph.E.create distributor6_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        distributor_total_v;
+      WaterfallGraph.E.create distributor7_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        distributor_total_v;
+      WaterfallGraph.E.create distributor8_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        distributor_total_v;
+      WaterfallGraph.E.create producer1_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        producer_total_v;
+      WaterfallGraph.E.create producer2_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        producer_total_v;
+      WaterfallGraph.E.create producer3_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        producer_total_v;
+      WaterfallGraph.E.create producer4_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        producer_total_v;
+      WaterfallGraph.E.create producer5_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        producer_total_v;
+      WaterfallGraph.E.create producer6_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        producer_total_v;
+      WaterfallGraph.E.create canal_plus1_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        canal_plus_total_v;
+      WaterfallGraph.E.create canal_plus2_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        canal_plus_total_v;
+      WaterfallGraph.E.create sofica1_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        sofica_total_v;
+      WaterfallGraph.E.create sofica2_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        sofica_total_v;
+      WaterfallGraph.E.create sofica3_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        sofica_total_v;
+      WaterfallGraph.E.create sofica4_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        sofica_total_v;
     ]
   in
   let g = WaterfallGraph.empty in

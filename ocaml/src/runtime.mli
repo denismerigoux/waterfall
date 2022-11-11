@@ -53,7 +53,7 @@ end
 type money_flow = Overflow | Underflow of share
 
 module EdgeLabel : sig
-  type t = MoneyFlow of money_flow | ControlFlow
+  type t = MoneyFlow of money_flow
 
   val default : t
   val compare : 'a -> 'a -> int

@@ -106,7 +106,7 @@ end
 type money_flow = Overflow | Underflow of share
 
 module EdgeLabel = struct
-  type t = MoneyFlow of money_flow | ControlFlow
+  type t = MoneyFlow of money_flow
 
   let default = MoneyFlow Overflow
   let compare = compare
@@ -195,39 +195,8 @@ let format_state fmt state =
       Format.fprintf fmt "%a -> %a\n" VertexId.format v format_money m)
     state
 
-let check_control_edges (g : WaterfallGraph.t) : unit =
-  WaterfallGraph.iter_vertex
-    (fun v ->
-      let control_vertices =
-        WaterfallGraph.fold_pred_e
-          (fun e control_vertices ->
-            match WaterfallGraph.E.label e with
-            | ControlFlow ->
-              VertexSet.add (WaterfallGraph.E.src e).id control_vertices
-            | MoneyFlow _ -> control_vertices)
-          g v VertexSet.empty
-      in
-      let used_vertices =
-        match v.vertex_type with
-        | NodeWithOverflow c -> used_vertices c
-        | _ -> VertexSet.empty
-      in
-      if not (VertexSet.equal control_vertices used_vertices) then
-        failwith
-          (Format.asprintf "Failed control edges for node %a" VertexId.format
-             v.id))
-    g
-
 let check_no_cycle (g : WaterfallGraph.t) : unit =
   (* we only check for cycles in the money flow, control edges can cycle *)
-  let g =
-    WaterfallGraph.fold_edges_e
-      (fun e g ->
-        match WaterfallGraph.E.label e with
-        | MoneyFlow _ -> g
-        | ControlFlow -> WaterfallGraph.remove_edge_e g e)
-      g g
-  in
   let nb_components, _ = WaterfallGraphSCC.scc g in
   if nb_components <> WaterfallGraph.nb_vertex g then failwith "Failed cycle"
 
@@ -283,7 +252,6 @@ let check_number_and_type_edges (g : WaterfallGraph.t) : unit =
 
 let check_consistency (g : WaterfallGraph.t) (state : state) : unit =
   check_no_cycle g;
-  check_control_edges g;
   check_state g state;
   check_number_and_type_edges g
 
@@ -375,13 +343,7 @@ let add_money_to_graph
           match WaterfallGraph.E.label e with
           | MoneyFlow (Underflow share) ->
             VertexMap.add (WaterfallGraph.E.dst e).id share acc, edges_flow
-          | MoneyFlow Overflow -> acc, edges_flow
-          | ControlFlow ->
-            ( acc,
-              ( v.id,
-                { PrintEdgeLabel.label = ControlFlow; flow = None },
-                (WaterfallGraph.E.dst e).id )
-              :: edges_flow ))
+          | MoneyFlow Overflow -> acc, edges_flow)
         g v
         (VertexMap.empty, edges_flow)
     in
@@ -489,32 +451,27 @@ let add_money_to_graph
     new_state, new_inputs, new_edges_flow, new_filling_state
   in
   let sccs = List.rev (WaterfallGraphSCC.scc_list g) in
-  let new_state, _, edges_flow, filling_state =
+  let run_computation state inputs =
     List.fold_left
       (fun acc scc ->
         if List.length scc = 1 then process_vertex (List.hd scc) acc
         else
           let state, inputs, edges_flow, filling_state = acc in
-          let new_state, new_inputs, new_edges_flow, _ =
+          let new_state, new_inputs, new_edges_flow, new_filling_state =
             List.fold_left
               (fun acc v -> process_vertex v acc)
               (state, inputs, edges_flow, filling_state)
               scc
           in
-          (* we re-run computation to get the cross-lateralized basins filling
-             status right *)
-          let _, _, _, new_filling_state =
-            List.fold_left
-              (fun acc v -> process_vertex v acc)
-              ( new_state,
-                VertexMap.map (fun _ -> money_from_units 0) inputs,
-                edges_flow,
-                filling_state )
-              scc
-          in
           new_state, new_inputs, new_edges_flow, new_filling_state)
       (state, inputs, [], VertexMap.empty)
       sccs
+  in
+  let new_state, _, edges_flow, _ = run_computation state inputs in
+  (* we re-run thge computation to get the filling state right *)
+  let _, _, _, filling_state =
+    run_computation new_state
+      (VertexMap.map (fun _ -> money_from_units 0) inputs)
   in
   let delta_graph =
     WaterfallGraph.fold_vertex
@@ -641,7 +598,6 @@ module Printer = Graph.Graphviz.Dot (struct
           flow
     in
     match (PrintWaterfallGraph.E.label e).label with
-    | ControlFlow -> [`Style `Invis; `Arrowhead `None; `Constraint false]
     | MoneyFlow Overflow ->
       [`HtmlLabel ("<FONT COLOR='#008aa6'>■100%</FONT>" ^ flow_str)]
     | MoneyFlow (Underflow s) -> (
