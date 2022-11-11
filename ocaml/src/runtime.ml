@@ -250,10 +250,40 @@ let check_number_and_type_edges (g : WaterfallGraph.t) : unit =
             (Format.asprintf "normally no underflow for %a" VertexId.format v.id))
     g
 
+module PathChecker = Graph.Path.Check (WaterfallGraph)
+
+let check_no_dependency_conflicts (g : WaterfallGraph.t) : unit =
+  let path_checker = PathChecker.create g in
+  WaterfallGraph.iter_vertex
+    (fun v ->
+      match v.Vertex.vertex_type with
+      | NodeWithoutOverflow | Sink -> ()
+      | NodeWithOverflow c ->
+        let used_vertices = used_vertices c in
+        (* the used vertices must not be downstream in the graph from [v]*)
+        VertexSet.iter
+          (fun used_vertex_id ->
+            let used_vertex =
+              Option.get
+                (WaterfallGraph.fold_vertex
+                   (fun v' acc ->
+                     if VertexId.equal v'.id used_vertex_id then Some v'
+                     else acc)
+                   g None)
+            in
+            if PathChecker.check_path path_checker v used_vertex then
+              failwith
+                (Format.asprintf
+                   "%a uses value of %a which is downstream in the graph"
+                   VertexId.format v.id VertexId.format used_vertex_id))
+          used_vertices)
+    g
+
 let check_consistency (g : WaterfallGraph.t) (state : state) : unit =
   check_no_cycle g;
   check_state g state;
-  check_number_and_type_edges g
+  check_number_and_type_edges g;
+  check_no_dependency_conflicts g
 
 module WaterfallGraphTopological = Graph.Topological.Make (WaterfallGraph)
 
