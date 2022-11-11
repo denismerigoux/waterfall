@@ -28,6 +28,7 @@ let () =
   let sofica4_id = VertexId.fresh "sofica4" in
   let sofica_total_id = VertexId.fresh "sofica_total" in
   let netflix_id = VertexId.fresh "netflix" in
+  let netflix_total_id = VertexId.fresh "netflix_total" in
 
   let soutien_prod_source_id = VertexId.fresh "soutien_prod_source" in
   let soutien_distrib_source_id = VertexId.fresh "soutien_distrib_source" in
@@ -173,7 +174,11 @@ let () =
   let cinema_second_basin_v =
     {
       Vertex.id = cinema_second_basin_id;
-      vertex_type = NodeWithOverflow (Cutoff (money_from_units 40_000));
+      vertex_type =
+        NodeWithOverflow
+          (CrossCollateralization
+             ( Cutoff (money_from_units 40_000),
+               VertexSet.singleton cinema_first_basin_id ));
       subgraph = Some waterfall_cine;
     }
   in
@@ -386,7 +391,14 @@ let () =
     { Vertex.id = sofica_total_id; vertex_type = Sink; subgraph = Some sinks }
   in
   let netflix_v =
-    { Vertex.id = netflix_id; vertex_type = Sink; subgraph = Some sinks }
+    {
+      Vertex.id = netflix_id;
+      vertex_type = NodeWithoutOverflow;
+      subgraph = Some waterfall_platform;
+    }
+  in
+  let netflix_total_v =
+    { Vertex.id = netflix_total_id; vertex_type = Sink; subgraph = Some sinks }
   in
   let canal_plus1_v =
     {
@@ -567,6 +579,9 @@ let () =
       WaterfallGraph.E.create sofica4_v
         (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
         sofica_total_v;
+      WaterfallGraph.E.create netflix_v
+        (EdgeLabel.MoneyFlow (Underflow (share_from_percentage 100)))
+        netflix_total_v;
     ]
   in
   let g = WaterfallGraph.empty in

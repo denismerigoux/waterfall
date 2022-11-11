@@ -627,10 +627,14 @@ module Printer = Graph.Graphviz.Dot (struct
         Format.asprintf "<BR/><FONT COLOR=\'#00691c\'>+%a</FONT>" format_money
           flow
     in
-    match (PrintWaterfallGraph.E.label e).label with
-    | MoneyFlow Overflow ->
+    match
+      ( (PrintWaterfallGraph.E.dst e).vertex_type,
+        (PrintWaterfallGraph.E.label e).label )
+    with
+    | Sink, _ -> [`Style `Invis]
+    | _, MoneyFlow Overflow ->
       [`HtmlLabel ("<FONT COLOR='#008aa6'>■100%</FONT>" ^ flow_str)]
-    | MoneyFlow (Underflow s) -> (
+    | _, MoneyFlow (Underflow s) -> (
       match (PrintWaterfallGraph.E.src e).vertex_type with
       | NodeWithOverflow _ ->
         [
