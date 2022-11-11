@@ -562,7 +562,8 @@ let to_printable_graph
 module Printer = Graph.Graphviz.Dot (struct
   include PrintWaterfallGraph
 
-  let graph_attributes (_g : t) : Graph.Graphviz.DotAttributes.graph list = []
+  let graph_attributes (_g : t) : Graph.Graphviz.DotAttributes.graph list =
+    [`Rankdir `LeftToRight; `OrderingOut]
 
   let default_vertex_attributes (_g : t) :
       Graph.Graphviz.DotAttributes.vertex list =
@@ -574,7 +575,7 @@ module Printer = Graph.Graphviz.Dot (struct
     match v.vertex_type with
     | Sink ->
       [
-        `Shape `Doubleoctagon;
+        `Shape `Folder;
         `HtmlLabel
           (Format.asprintf "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a"
              VertexId.format v.id format_money
@@ -588,6 +589,8 @@ module Printer = Graph.Graphviz.Dot (struct
       ]
     | NodeWithoutOverflow ->
       [
+        `Shape `Cds;
+        `Height 0.75;
         `HtmlLabel
           (Format.asprintf "<B>%a</B><BR/><FONT COLOR='#516ae8'>⬓: %a</FONT>%a"
              VertexId.format v.id format_money
@@ -638,7 +641,7 @@ module Printer = Graph.Graphviz.Dot (struct
           flow
     in
     match (PrintWaterfallGraph.E.label e).label with
-    | ControlFlow -> [`Style `Dotted; `Arrowhead `Normal; `Constraint false]
+    | ControlFlow -> [`Style `Invis; `Arrowhead `None; `Constraint false]
     | MoneyFlow Overflow ->
       [`HtmlLabel ("<FONT COLOR='#008aa6'>■100%</FONT>" ^ flow_str)]
     | MoneyFlow (Underflow s) -> (
