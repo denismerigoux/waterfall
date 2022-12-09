@@ -256,6 +256,8 @@ let check_no_dependency_conflicts (g : WaterfallGraph.t) : unit =
   let path_checker = PathChecker.create g in
   WaterfallGraph.iter_vertex
     (fun v ->
+      (* TODO: also check that ancestors don't flow down to used vertices as
+         well *)
       match v.Vertex.vertex_type with
       | NodeWithoutOverflow | Sink -> ()
       | NodeWithOverflow c ->

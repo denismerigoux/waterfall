@@ -2,6 +2,12 @@ open Runtime
 
 [@@@warning "-26"]
 
+let print_graph filename printable_graph =
+  let oc = open_out filename in
+  let fmt = Format.formatter_of_out_channel oc in
+  Printer.fprint_graph fmt printable_graph;
+  close_out oc
+
 let () =
   let distributor_total_id = VertexId.fresh "distributor_total" in
   let distributor1_id = VertexId.fresh "distributor1" in
@@ -591,24 +597,16 @@ let () =
       (fun v state -> VertexMap.add v.id (money_from_units 0) state)
       g VertexMap.empty
   in
+  print_graph "graph_init.dot" (to_printable_graph g state1);
   let state2, delta_graph12 =
     add_money_to_graph g state1 cinema_source_id (money_from_units 100_000)
   in
-  let oc = open_out "graph1.dot" in
-  let fmt = Format.formatter_of_out_channel oc in
-  Printer.fprint_graph fmt delta_graph12;
-  close_out oc;
+  print_graph "graph1.dot" delta_graph12;
   let state3, delta_graph23 =
     add_money_to_graph g state2 platform_source_id (money_from_units 200_000)
   in
-  let oc = open_out "graph2.dot" in
-  let fmt = Format.formatter_of_out_channel oc in
-  Printer.fprint_graph fmt delta_graph23;
-  close_out oc;
+  print_graph "graph2.dot" delta_graph23;
   let _state4, delta_graph34 =
     add_money_to_graph g state3 tv_source_id (money_from_units 150_000)
   in
-  let oc = open_out "graph3.dot" in
-  let fmt = Format.formatter_of_out_channel oc in
-  Printer.fprint_graph fmt delta_graph34;
-  close_out oc
+  print_graph "graph3.dot" delta_graph34
